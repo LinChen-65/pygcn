@@ -9,8 +9,16 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 
-from pygcn.utils import load_data, accuracy
-from pygcn.models import GCN
+#from pygcn.utils import load_data, accuracy #original
+#from pygcn.models import GCN #original
+from utils import load_data, accuracy #20220112
+from models import GCN # #20220112
+
+from torch.nn import Sequential
+from models import get_model
+from config import *
+import random
+import pdb
 
 # Training settings
 parser = argparse.ArgumentParser()
@@ -41,11 +49,41 @@ if args.cuda:
 # Load data
 adj, features, labels, idx_train, idx_val, idx_test = load_data()
 
+num_graphs = 1 #test
+idx_train = torch.tensor([0])
+idx_val = torch.tensor([0])
+idx_test = torch.tensor([0])
+#perturbed_features = [features + np.random.randn(features.shape[0], features.shape[1]) for i in range(num_graphs)] #test
+
+perturbed_features = torch.zeros(num_graphs, features.shape[0], features.shape[1])
+for i in range(num_graphs):
+    perturbed_features[i] = features + torch.randn(features.shape[0], features.shape[1])
+
+#perturbed_features = features     
+graph_labels = torch.randn(num_graphs) #test
+
+
+
 # Model and optimizer
+'''
+#original
 model = GCN(nfeat=features.shape[1],
             nhid=args.hidden,
             nclass=labels.max().item() + 1,
             dropout=args.dropout)
+'''
+config = Config()
+config.gcn_nfeat = features.shape[1]
+config.gcn_nhid = args.hidden
+config.gcn_nclass = labels.max().item() + 1
+config.gcn_dropout = args.dropout
+config.linear_nin = features.shape[0] #num_nodes
+config.linear_nhid1 = 64
+config.linear_nhid2 = 8
+config.linear_nout = 1
+
+model = get_model(config)
+
 optimizer = optim.Adam(model.parameters(),
                        lr=args.lr, weight_decay=args.weight_decay)
 
@@ -58,17 +96,48 @@ if args.cuda:
     idx_val = idx_val.cuda()
     idx_test = idx_test.cuda()
 
+    perturbed_features = perturbed_features.cuda() #20220112
+    graph_labels = graph_labels.cuda() #20220112
+
 
 def train(epoch):
     t = time.time()
     model.train()
+    #sample_idx_train = random.sample(idx_train, 1)
+    #sample_idx_val = random.sample(idx_val, 1)
+    sample_idx_train = torch.tensor(random.sample(range(len(idx_train)), 1))
+    sample_idx_val = torch.tensor(random.sample(range(len(idx_val)), 1))
+    #pdb.set_trace()
     optimizer.zero_grad()
-    output = model(features, adj)
-    loss_train = F.nll_loss(output[idx_train], labels[idx_train])
-    acc_train = accuracy(output[idx_train], labels[idx_train])
+    #output = model(features, adj) #original
+    gcn_output = model[0](perturbed_features[sample_idx_train].squeeze(), adj) #20220112
+    compressed = torch.mean(gcn_output, axis=1) #20220112
+    output = model[1](compressed)#20220112
+    loss_train = F.l1_loss(output, graph_labels[sample_idx_train.squeeze()]) #20220112
+
+    #loss_train = F.nll_loss(output[idx_train], labels[idx_train])#original
+    #acc_train = accuracy(output[idx_train], labels[idx_train])#original
     loss_train.backward()
     optimizer.step()
 
+    if not args.fastmode:
+        # Evaluate validation set performance separately,
+        # deactivates dropout during validation run.
+        model.eval()
+        gcn_output = model[0](perturbed_features[sample_idx_val].squeeze(), adj) #20220112
+        compressed = torch.mean(gcn_output, axis=1) #20220112
+        output = model[1](compressed)
+
+    loss_val = F.l1_loss(output, graph_labels[sample_idx_val]) #20220112
+    print('Epoch: {:04d}'.format(epoch+1),
+          'loss_train: {:.4f}'.format(loss_train.item()),
+          'loss_val: {:.4f}'.format(loss_val.item()),
+          'time: {:.4f}s'.format(time.time() - t))
+
+    #pdb.set_trace()
+
+    '''
+    #original
     if not args.fastmode:
         # Evaluate validation set performance separately,
         # deactivates dropout during validation run.
@@ -83,7 +152,7 @@ def train(epoch):
           'loss_val: {:.4f}'.format(loss_val.item()),
           'acc_val: {:.4f}'.format(acc_val.item()),
           'time: {:.4f}s'.format(time.time() - t))
-
+    '''
 
 def test():
     model.eval()
@@ -101,6 +170,7 @@ for epoch in range(args.epochs):
     train(epoch)
 print("Optimization Finished!")
 print("Total time elapsed: {:.4f}s".format(time.time() - t_total))
+pdb.set_trace()
 
 # Testing
-test()
+#test()
