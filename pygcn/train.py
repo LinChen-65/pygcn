@@ -19,6 +19,10 @@ from models import get_model
 from config import *
 import random
 import pdb
+import os
+
+#在命令行中输入参数了（先写参数名称，空格，再写参数的值）：python opp.py --height 5 --width 4 --length 3
+# https://blog.csdn.net/fjswcjswzy/article/details/105737647?utm_medium=distribute.pc_relevant.none-task-blog-2~default~baidujs_title~default-0.pc_relevant_paycolumn_v2&spm=1001.2101.3001.4242.1&utm_relevant_index=3
 
 # Training settings
 parser = argparse.ArgumentParser()
@@ -37,6 +41,11 @@ parser.add_argument('--hidden', type=int, default=16,
                     help='Number of hidden units.')
 parser.add_argument('--dropout', type=float, default=0.5,
                     help='Dropout rate (1 - keep probability).')
+#20220113
+parser.add_argument('--gtfilepath', default=os.path.abspath(os.path.join(os.pardir,'data/safegraph')),
+                    help='Path for ground truth .csv files.')
+parser.add_argument('--msa_name', 
+                    help='MSA name.')
 
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -47,7 +56,10 @@ if args.cuda:
     torch.cuda.manual_seed(args.seed)
 
 # Load data
-adj, features, labels, idx_train, idx_val, idx_test = load_data()
+#adj, features, labels, idx_train, idx_val, idx_test = load_data() #original
+filepath = os.path.join(args.gtfilepath, args.msa_name, 'vac_results_SanFrancisco_0.02_200_randomseed66_30seeds_5samples.csv') #20220113
+adj, features, labels, idx_train, idx_val, idx_test = load_data(path=filepath, dataset=f'safegraph-{args.msa_name}') #20220113
+pdb.set_trace()
 
 num_graphs = 1 #test
 idx_train = torch.tensor([0])
