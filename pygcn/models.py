@@ -6,6 +6,8 @@ from layers import GraphConvolution #20220112
 from torch.nn import Parameter, Linear, Sequential, Module #20220112
 from activaition import get as get_activation
 
+import pdb
+
 class GCN(nn.Module):
     def __init__(self, nfeat, nhid, nclass, dropout):
         super(GCN, self).__init__()
@@ -15,6 +17,7 @@ class GCN(nn.Module):
         self.dropout = dropout
 
     def forward(self, x, adj):
+        #pdb.set_trace()
         x = F.relu(self.gc1(x, adj))
         x = F.dropout(x, self.dropout, training=self.training)
         x = self.gc2(x, adj)
@@ -31,6 +34,7 @@ class LinearLayers(nn.Module): #20220112
         self.linear3 = Linear(nhid2, nout, bias=self.bias)
 
     def forward(self, x):
+        #pdb.set_trace()
         x = F.relu(self.linear1(x))
         x = F.relu(self.linear2(x))
         x = self.linear3(x)
