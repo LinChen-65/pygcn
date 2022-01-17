@@ -116,7 +116,7 @@ model = get_model(config)
 optimizer = optim.Adam(model.parameters(),
                        lr=args.lr, weight_decay=args.weight_decay)
 
-
+random.seed(42)
 
 if args.cuda:
     model.cuda()
@@ -146,8 +146,8 @@ def train(epoch):
     
     #optimizer.zero_grad() #original
 
-    output_list = []
-    truth_list = []
+    output_train_list = []
+    truth_train_list = []
     loss_train_list = []
     accumulation_step = 20 #20220115
     #for i in range(len(idx_train)):
@@ -163,8 +163,8 @@ def train(epoch):
         loss_train = F.mse_loss(output.squeeze(), graph_labels[sample_idx_train.squeeze()]) #20220114
         loss_train.backward() #20220115
 
-        output_list.append(output.item())
-        truth_list.append(graph_labels[sample_idx_train.squeeze()].item())
+        output_train_list.append(output.item())
+        truth_train_list.append(graph_labels[sample_idx_train.squeeze()].item())
         loss_train_list.append(loss_train.item())
 
     #loss_train = torch.mean(torch.Tensor(np.array(loss_train_list)).requires_grad_()) #20220114
@@ -177,8 +177,8 @@ def train(epoch):
         # deactivates dropout during validation run.
         model.eval()
 
-        output_list = []
-        truth_list = []
+        output_val_list = []
+        truth_val_list = []
         loss_val_list = []
         for i in range(len(idx_val)):
             sample_idx_val = idx_val[i]
@@ -191,20 +191,24 @@ def train(epoch):
             loss_val = F.mse_loss(output.squeeze(), graph_labels[sample_idx_val]) #20220114
             
 
-            output_list.append(output.item())
-            truth_list.append(graph_labels[sample_idx_val.squeeze()].item())
+            output_val_list.append(output.item())
+            truth_val_list.append(graph_labels[sample_idx_val.squeeze()].item())
             loss_val_list.append(loss_val.item())
 
         loss_val = np.mean(np.array(loss_val_list))
-        if(loss_val<=6000):
-            print(loss_val)
-            return True
-        if(epoch%100==0):
+        #if(loss_val<=6000):
+        #    print(loss_val)
+        #    return True
+        #if(epoch%10==0):
+        if(epoch==110):
             print('Epoch: {:04d}'.format(epoch+1),
-                'loss_train: {:.4f}'.format(loss_train.item()),
+                #'loss_train: {:.4f}'.format(loss_train.item()),
+                'loss_train: {:.4f}'.format(np.mean(np.array(loss_train_list))),
                 'loss_val: {:.4f}'.format(loss_val.item()),
                 #'time: {:.4f}s'.format(time.time() - t),
                 )
+            pdb.set_trace()
+
     return False
 
 
@@ -212,8 +216,8 @@ def test():
     model.eval()
     
     #sample_idx_test = idx_test[random.sample(range(len(idx_test)), 1)] #20220114
-    output_list = []
-    truth_list = []
+    output_test_list = []
+    truth_test_list = []
     loss_test_list = []
     for i in range(len(idx_test)):
         sample_idx_test = idx_test[i]
@@ -223,8 +227,8 @@ def test():
         #loss_test = F.l1_loss(output, graph_labels[sample_idx_test.squeeze()]) #20220112
         loss_test = F.mse_loss(output.squeeze(), graph_labels[sample_idx_test.squeeze()]) #20220114
 
-        output_list.append(output.item())
-        truth_list.append(graph_labels[sample_idx_test.squeeze()].item())
+        output_test_list.append(output.item())
+        truth_test_list.append(graph_labels[sample_idx_test.squeeze()].item())
         loss_test_list.append(loss_test.item())
     
     loss_test = np.mean(np.array(loss_test_list))
@@ -232,6 +236,8 @@ def test():
           "loss= {:.4f}".format(loss_test.item()),
           )
     #print(np.array(output_list)-np.array(truth_list))
+    print('output_test_list: ', output_test_list)
+    print('truth_test_list: ', truth_test_list)
     pdb.set_trace()
 
 
