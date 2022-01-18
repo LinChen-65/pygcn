@@ -416,14 +416,9 @@ def assign_acceptance_quantile(quantile, acceptance_scenario=None):
         pdb.set_trace()
 
 
-def vaccine_distribution_fixed_nn(cbg_table, vaccination_ratio, nn, target_idxs=None): #20220113
+def vaccine_distribution_fixed_nn(cbg_table, vaccination_ratio, nn, proportional, target_idxs=None): #20220113
     num_cbgs = len(cbg_table)#;print('num_cbgs: ',num_cbgs)
-    cbg_sizes = cbg_table['Sum']
-
-    # Calculate number of available vaccines, number of vaccines each cbg can have
-    num_vaccines = cbg_sizes.sum() * vaccination_ratio
-    print('Total num of vaccines: ',num_vaccines)
-    num_vaccines_per_cbg = num_vaccines / nn
+    cbg_sizes = np.array(cbg_table['Sum'])
 
     if(target_idxs is None):
         print(f'Does not specify target cbgs. Randomly choose {nn} cbgs to assign vaccines.')
@@ -431,10 +426,22 @@ def vaccine_distribution_fixed_nn(cbg_table, vaccination_ratio, nn, target_idxs=
     else:
         assert len(target_idxs) == nn, 'Wrong number of targeted cbgs!'
 
+    # Calculate number of available vaccines, number of vaccines each cbg can have
+    num_vaccines = cbg_sizes.sum() * vaccination_ratio
+    print('Total num of vaccines: ',num_vaccines)
+    
     vaccination_vector = np.zeros(num_cbgs)
-    for idx in target_idxs:
-        vaccination_vector[idx] = num_vaccines_per_cbg
-
+    if(proportional==False):
+        num_vaccines_per_cbg = num_vaccines / nn
+        for idx in target_idxs:
+            vaccination_vector[idx] = num_vaccines_per_cbg
+    else:
+        target_population = 0
+        for idx in target_idxs:
+            target_population += cbg_sizes[idx]
+        for idx in target_idxs:
+            vaccination_vector[idx] = num_vaccines / target_population * cbg_sizes[idx]
+        
     # Ensure that no CBG receives more vaccines than its population (may waste some)
     vaccination_vector = np.minimum(vaccination_vector,np.array(cbg_table['Sum']))
     print('Final check: num of distributed vaccines:',vaccination_vector.sum())

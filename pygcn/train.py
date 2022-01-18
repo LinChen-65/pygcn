@@ -199,15 +199,16 @@ def train(epoch):
         #if(loss_val<=6000):
         #    print(loss_val)
         #    return True
-        #if(epoch%10==0):
-        if(epoch==110):
+        
+        #if(epoch==110):
+        if(epoch%100==0):
             print('Epoch: {:04d}'.format(epoch+1),
                 #'loss_train: {:.4f}'.format(loss_train.item()),
                 'loss_train: {:.4f}'.format(np.mean(np.array(loss_train_list))),
                 'loss_val: {:.4f}'.format(loss_val.item()),
                 #'time: {:.4f}s'.format(time.time() - t),
                 )
-            pdb.set_trace()
+            #pdb.set_trace()
 
     return False
 

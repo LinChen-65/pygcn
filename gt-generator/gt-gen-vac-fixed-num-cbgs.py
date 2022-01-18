@@ -1,5 +1,5 @@
-# python gt-gen-vac-fixed-num-cbgs.py MSA_NAME RANDOM_SEED NN NUM_EXPERIMENTS Squick_test
-# python gt-gen-vac-fixed-num-cbgs.py Atlanta 66 150 100 False
+# python gt-gen-vac-fixed-num-cbgs.py MSA_NAME RANDOM_SEED NN NUM_EXPERIMENTS quick_test
+# python gt-gen-vac-fixed-num-cbgs.py Atlanta 66 100 100 False
 
 import setproctitle
 setproctitle.setproctitle("gnn-simu-vac@chenlin")
@@ -69,15 +69,20 @@ else: NUM_SEEDS = 30 #60 #30
 print('NUM_SEEDS: ', NUM_SEEDS)
 STARTING_SEED = range(NUM_SEEDS)
 
-# Store filename
-filename = os.path.join(gt_result_root, MSA_NAME, 
-                        'vac_results_%s_%s_%s_randomseed%s_%sseeds_%ssamples.csv'%(MSA_NAME,VACCINATION_RATIO,NN,RANDOM_SEED,NUM_SEEDS, NUM_EXPERIMENTS))
-print('File name: ', filename)
-
-#policy_list=['Randombag']
 demo_feat_list = ['Age', 'Mean_Household_Income', 'Essential_Worker']
 
-REL_TO = 'No_Vaccination'
+proportional = True # If true, divide vaccines proportional to cbg populations #20220117
+if(proportional==True):
+    extra_string = 'proportional'
+else:
+    extra_string = 'identical'
+
+# Store filename
+filename = os.path.join(gt_result_root, MSA_NAME, 
+                        'vac_results_%s_%s_%s_randomseed%s_%sseeds_%ssamples_%s.csv'
+                        %(MSA_NAME,VACCINATION_RATIO,NN,RANDOM_SEED,NUM_SEEDS, NUM_EXPERIMENTS, extra_string))
+print('File name: ', filename)
+
 
 ###############################################################################
 # Functions
@@ -120,113 +125,7 @@ def run_simulation(starting_seed, num_seeds, vaccination_vector, vaccine_accepta
     del D2
     #return total_affected, history_C2, history_D2, total_affected_each_cbg
     return history_C2, history_D2
-
-# Analyze results and produce graphs: All policies
-def output_result(cbg_table, demo_feat, policy_list, num_groups, rel_to, print_result=True):
-    results = {}
-    
-    for policy in policy_list:
-        exec("final_deaths_rate_%s_total = cbg_table['Final_Deaths_%s'].sum()/cbg_table['Sum'].sum()" % (policy.lower(),policy))
-        cbg_table['Final_Deaths_' + policy] = eval('avg_final_deaths_' + policy.lower())
-        exec("%s = np.zeros(num_groups)" % ('final_deaths_rate_'+ policy.lower()))
-        deaths_total_abs = eval('final_deaths_rate_%s_total'%(policy.lower()))
-        
-        for i in range(num_groups):
-            #eval('final_deaths_rate_'+ policy.lower())[i] = cbg_table[cbg_table[demo_feat + '_Quantile']==i]['Final_Deaths_' + policy].sum()
-            #eval('final_deaths_rate_'+ policy.lower())[i] /= cbg_table[cbg_table[demo_feat + '_Quantile']==i]['Sum'].sum()
-            eval('final_deaths_rate_'+ policy.lower())[i] = cbg_table[cbg_table[demo_feat + '_Quantile_FOR_GINI']==i]['Final_Deaths_' + policy].sum()
-            eval('final_deaths_rate_'+ policy.lower())[i] /= cbg_table[cbg_table[demo_feat + '_Quantile_FOR_GINI']==i]['Sum'].sum()
-        deaths_gini_abs = functions.gini(eval('final_deaths_rate_'+ policy.lower()))
-       
-        if(rel_to=='No_Vaccination'): # compared to No_Vaccination
-            if(policy=='No_Vaccination'):
-                deaths_total_no_vaccination = deaths_total_abs
-                deaths_gini_no_vaccination = deaths_gini_abs
-                deaths_total_rel = 0
-                deaths_gini_rel = 0
-                results[policy] = {
-                                   'deaths_total_abs':'%.6f'% deaths_total_abs, #.6f
-                                   'deaths_total_rel':'%.6f'% deaths_total_rel,
-                                   'deaths_gini_abs':'%.6f'% deaths_gini_abs,
-                                   'deaths_gini_rel':'%.6f'% deaths_gini_rel}   
-            else:
-                deaths_total_rel = (eval('final_deaths_rate_%s_total'%(policy.lower())) - deaths_total_no_vaccination) / deaths_total_no_vaccination
-                deaths_gini_rel = (functions.gini(eval('final_deaths_rate_'+ policy.lower())) - deaths_gini_no_vaccination) / deaths_gini_no_vaccination
-                results[policy] = {
-                                   'deaths_total_abs':'%.6f'% deaths_total_abs,
-                                   'deaths_total_rel':'%.6f'% deaths_total_rel,
-                                   'deaths_gini_abs':'%.6f'% deaths_gini_abs,
-                                   'deaths_gini_rel':'%.6f'% deaths_gini_rel}    
-        
-        elif(rel_to=='Baseline'): # compared to Baseline
-            if(policy=='Baseline'):
-                deaths_total_baseline = deaths_total_abs
-                deaths_gini_baseline = deaths_gini_abs
-                deaths_total_rel = 0
-                deaths_gini_rel = 0
-                results[policy] = {
-                                   'deaths_total_abs':'%.6f'% deaths_total_abs,
-                                   'deaths_total_rel':'%.6f'% deaths_total_rel,
-                                   'deaths_gini_abs':'%.6f'% deaths_gini_abs,
-                                   'deaths_gini_rel':'%.6f'% deaths_gini_rel}   
-            else:
-                deaths_total_rel = (eval('final_deaths_rate_%s_total'%(policy.lower())) - deaths_total_baseline) / deaths_total_baseline
-                deaths_gini_rel = (functions.gini(eval('final_deaths_rate_'+ policy.lower())) - deaths_gini_baseline) / deaths_gini_baseline
-                results[policy] = {
-                                   'deaths_total_abs':'%.6f'% deaths_total_abs,
-                                   'deaths_total_rel':'%.6f'% deaths_total_rel,
-                                   'deaths_gini_abs':'%.6f'% deaths_gini_abs,
-                                   'deaths_gini_rel':'%.6f'% deaths_gini_rel}                        
-                                    
-        if(print_result==True):
-            print('Policy: ', policy)
-            print('Deaths, Gini Index: ',functions.gini(eval('final_deaths_rate_'+ policy.lower())))
-            
-            if(policy=='Baseline'):
-                deaths_total_baseline = eval('final_deaths_rate_%s_total'%(policy.lower()))
-                deaths_gini_baseline = functions.gini(eval('final_deaths_rate_'+ policy.lower()))
-                
-            if(policy!='Baseline' and policy!='No_Vaccination'):
-                print('Compared to baseline:')
-                print('Deaths total: ', (eval('final_deaths_rate_%s_total'%(policy.lower())) - deaths_total_baseline) / deaths_total_baseline)
-                print('Deaths gini: ', (functions.gini(eval('final_deaths_rate_'+ policy.lower())) - deaths_gini_baseline) / deaths_gini_baseline)
-
-    return results
-
-def make_gini_table(policy_list, demo_feat_list, rel_to, num_groups, save_result=False, save_path=None):
-    
-    cbg_table_name_dict=dict()
-    cbg_table_name_dict['Age'] = cbg_age_msa
-    cbg_table_name_dict['Mean_Household_Income'] = cbg_income_msa
-    cbg_table_name_dict['Essential_Worker'] = cbg_occupation_msa
-    
-    print('Policy list: ', policy_list)
-    print('Demographic feature list: ', demo_feat_list)
-
-    gini_df = pd.DataFrame(columns=pd.MultiIndex.from_tuples([('All','deaths_total_abs'),('All','deaths_total_rel')]))
-    gini_df['Policy'] = policy_list
-        
-    for demo_feat in demo_feat_list:
-        results = output_result(cbg_table_name_dict[demo_feat], 
-                                demo_feat, policy_list, num_groups=NUM_GROUPS,
-                                print_result=False, rel_to=rel_to)
-       
-        for i in range(len(policy_list)):
-            policy = policy_list[i]
-            gini_df.loc[i,('All','deaths_total_abs')] = results[policy]['deaths_total_abs']
-            gini_df.loc[i,('All','deaths_total_rel')] = results[policy]['deaths_total_rel'] #if abs(float(results[policy]['deaths_total_rel']))>=0.01 else 0
-            gini_df.loc[i,(demo_feat,'deaths_gini_abs')] = results[policy]['deaths_gini_abs']
-            gini_df.loc[i,(demo_feat,'deaths_gini_rel')] = results[policy]['deaths_gini_rel'] #if abs(float(results[policy]['deaths_gini_rel']))>=0.01 else 0
-
-    gini_df.set_index(['Policy'],inplace=True)
-    # Transpose
-    gini_df_trans = pd.DataFrame(gini_df.values.T, index=gini_df.columns, columns=gini_df.index)#转置
-    # Save .csv
-    if(save_result==True):
-        gini_df_trans.to_csv(save_path)
-        
-    return gini_df_trans
-    
+  
 ###############################################################################
 # Load Data
 
@@ -308,10 +207,11 @@ for i in x:
         y.append(x[i])
      
 idxs_msa_all = list(x.values())
+'''
 idxs_msa_nyt = y
 print('Number of CBGs in this metro area:', len(idxs_msa_all))
 print('Number of CBGs in to compare with NYT data:', len(idxs_msa_nyt))
-'''
+
 nyt_included = np.zeros(len(idxs_msa_all))
 for i in range(len(nyt_included)):
     if(i in idxs_msa_nyt):
@@ -378,15 +278,12 @@ data['Sum'] = cbg_age_msa['Sum'].copy()
 data['Elder_Ratio'] = cbg_age_msa['Elder_Ratio'].copy()
 data['Mean_Household_Income'] = cbg_income_msa['Mean_Household_Income'].copy()
 data['Essential_Worker_Ratio'] = cbg_occupation_msa['Essential_Worker_Ratio'].copy()
-#data['Vulnerability'] = cbg_age_msa['Vulnerability'].copy()
-#data['Damage'] = cbg_age_msa['Damage'].copy()
 
 ###############################################################################
 # make dataframe
 result_df = pd.DataFrame(columns=['Vaccinated_Idxs','Total_Cases','Case_Rates_STD'])
 # Vaccine acceptance
 vaccine_acceptance = np.ones(len(cbg_sizes)) # full acceptance
-
 
 # Baseline:no_vaccination
 vaccination_vector_no_vaccination = np.zeros(len(cbg_sizes))
@@ -422,6 +319,7 @@ for random_idx in range(NUM_EXPERIMENTS):
     vaccination_vector_randombag = functions.vaccine_distribution_fixed_nn(cbg_table=data, 
                                                                            vaccination_ratio=VACCINATION_RATIO, 
                                                                            nn=NN, 
+                                                                           proportional=proportional, #20220117
                                                                            target_idxs=target_idxs
                                                                            )
     # Retrieve vaccinated CBGs
