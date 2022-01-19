@@ -24,16 +24,30 @@ def encode_onehot(labels):
     return labels_onehot
 
 
-def load_vac_results(vac_result_path): #20220117, 拆分代码
+def load_vac_results(vac_result_path, rel_result): #20220117, 拆分代码
     df = pd.read_csv(vac_result_path)
     num_samples = len(df)-1 #第0行是no_vaccination的结果
     # graph_labels
     # 把str转为list，split flag是', '，然后再把其中每个元素由str转为int(用map函数)
-    df['Vaccinated_Idxs'][0] = [] 
-    df['Vaccinated_Idxs'][1:] = df['Vaccinated_Idxs'][1:].apply(lambda x : list(map(int, (x.strip('[').strip(']').split(', ')))))
+    
+    # no_vaccination
+    #df['Vaccinated_Idxs'][0] = [] 
     final_cases_no_vac = df['Total_Cases'].loc[0]
     case_rate_std_no_vac = df['Case_Rates_STD'].loc[0]
-    graph_labels = torch.FloatTensor(np.array(pd.DataFrame(df[1:],columns=['Total_Cases','Case_Rates_STD'])))
+    
+    #df['Vaccinated_Idxs'][1:] = df['Vaccinated_Idxs'][1:].apply(lambda x : list(map(int, (x.strip('[').strip(']').split(', ')))))
+    #graph_labels = torch.FloatTensor(np.array(pd.DataFrame(df[1:],columns=['Total_Cases','Case_Rates_STD'])))
+    df = df[1:]
+    df['Vaccinated_Idxs'] = df['Vaccinated_Idxs'].apply(lambda x : list(map(int, (x.strip('[').strip(']').split(', ')))))
+    graph_labels = torch.FloatTensor(np.array(pd.DataFrame(df,columns=['Total_Cases','Case_Rates_STD'])))
+    if(rel_result):
+        print('rel_result=True')
+        #graph_labels[:,0] = (graph_labels[:,0]-final_cases_no_vac)/final_cases_no_vac
+        #graph_labels[:,1] = (graph_labels[:,1]-case_rate_std_no_vac)/case_rate_std_no_vac
+        graph_labels[:,0] = (graph_labels[:,0]-final_cases_no_vac)
+        graph_labels[:,1] = (graph_labels[:,1]-case_rate_std_no_vac)
+    else:
+        print('rel_result=False')
 
     # idx_train, idx_val, idx_test
     # Split train, val, test
@@ -45,7 +59,8 @@ def load_vac_results(vac_result_path): #20220117, 拆分代码
     idx_val = torch.LongTensor(idx_val)
     idx_test = torch.LongTensor(idx_test)
 
-    vac_tags = np.array(df['Vaccinated_Idxs'][1:])
+    #vac_tags = np.array(df['Vaccinated_Idxs'][1:])
+    vac_tags = np.array(df['Vaccinated_Idxs'])
 
     return graph_labels, idx_train, idx_val, idx_test, num_samples, vac_tags
 
@@ -207,13 +222,18 @@ def load_cbg_demographics(msa_name, mob_data_root, normalize=True): #20220117, �
     return cbg_sizes, cbg_elder_ratio, cbg_household_income, cbg_ew_ratio
 
 
-def load_data(vac_result_path="../data/cora/", dataset="cora", msa_name=None, mob_data_root=None, output_root=None):
+def load_data(vac_result_path="../data/cora/", dataset="cora", msa_name=None, mob_data_root=None, output_root=None, normalize=True, rel_result=True):
+    print('load_data:')
+    if(rel_result):
+        print('rel_result=True')
+    else:
+        print('rel_result=False')
     if('safegraph' in dataset):
         """Load safegraph dataset"""
         print('Loading {} dataset...'.format(dataset))
 
         # vaccination results
-        graph_labels, idx_train, idx_val, idx_test, num_samples, vac_tags = load_vac_results(vac_result_path)
+        graph_labels, idx_train, idx_val, idx_test, num_samples, vac_tags = load_vac_results(vac_result_path,rel_result)
         
         # adj
         adj, num_cbgs = load_adj(msa_name,mob_data_root,output_root)
@@ -222,7 +242,7 @@ def load_data(vac_result_path="../data/cora/", dataset="cora", msa_name=None, mo
         # pretrained_embed
         pretrained_embed, num_embed = load_pretrained_embed()
         # cbg population and other demographic features
-        cbg_sizes, cbg_elder_ratio, cbg_household_income, cbg_ew_ratio = load_cbg_demographics(msa_name, mob_data_root, normalize=True)
+        cbg_sizes, cbg_elder_ratio, cbg_household_income, cbg_ew_ratio = load_cbg_demographics(msa_name, mob_data_root, normalize)
         node_feats = np.zeros(((num_samples, num_cbgs, 5+num_embed)))
         node_feats[:,:,0] = cbg_sizes.reshape(1,-1)
         node_feats[:,:,1] = cbg_elder_ratio.reshape(1,-1)

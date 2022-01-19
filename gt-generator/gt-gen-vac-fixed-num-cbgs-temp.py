@@ -80,7 +80,7 @@ else:
 
 # Store filename
 filename = os.path.join(gt_result_root, MSA_NAME, 
-                        'vac_results_%s_%s_%s_randomseed%s_%sseeds_%ssamples_%s.csv'
+                        'vac_results_%s_%s_%s_randomseed%s_%sseeds_%ssamples_%s_latterpart.csv'
                         %(MSA_NAME,VACCINATION_RATIO,NN,RANDOM_SEED,NUM_SEEDS, NUM_EXPERIMENTS, extra_string))
 print('File name: ', filename)
 
@@ -305,7 +305,7 @@ data['Hybrid_Group'] = data.apply(lambda x : assign_hybrid_group(x), axis=1)
 result_df = pd.DataFrame(columns=['Vaccinated_Idxs','Total_Cases','Case_Rates_STD','Total_Deaths','Death_Rates_STD'])
 # Vaccine acceptance
 vaccine_acceptance = np.ones(len(cbg_sizes)) # full acceptance
-
+'''
 # Baseline:no_vaccination
 vaccination_vector_no_vaccination = np.zeros(len(cbg_sizes))
 # Run simulations
@@ -331,7 +331,7 @@ result_df = result_df.append({'Vaccinated_Idxs':[],
                               'Death_Rates_STD':death_rates_std_no_vaccination,
                             }, ignore_index=True)
 print(result_df)  
-
+'''
 
 ###############################################################################
 # 分层——采样：
@@ -384,7 +384,8 @@ for group_idx in range(max_group_idx):
         print('group_idx: ', group_idx, ', sample_idx: ', i)
         # Construct the vaccination vector
         target_idxs = random.sample(list(data[data['Hybrid_Group']==group_idx].index),NN) #只在组内采样
-
+        if(group_idx<count/2):
+            continue
 
 
         vaccination_vector_randombag = functions.vaccine_distribution_fixed_nn(cbg_table=data, 

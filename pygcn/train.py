@@ -1,3 +1,6 @@
+import setproctitle
+setproctitle.setproctitle("gnn-simu-vac@chenlin")
+
 from __future__ import division
 from __future__ import print_function
 
