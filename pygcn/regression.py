@@ -1,7 +1,7 @@
 import setproctitle
 setproctitle.setproctitle("gnn-simu-vac@chenlin")
 
-from utils import load_data
+from utils import load_data, visualize
 import argparse
 import os
 import sys
@@ -21,21 +21,7 @@ import pdb
 
 # Training settings
 parser = argparse.ArgumentParser()
-#parser.add_argument('--no-cuda', action='store_true', default=False,
-#                    help='Disables CUDA training.')
-#parser.add_argument('--fastmode', action='store_true', default=False,
-#                    help='Validate during training pass.')
-#parser.add_argument('--seed', type=int, default=42, help='Random seed.')
-#parser.add_argument('--epochs', type=int, default=200,
-#                    help='Number of epochs to train.')
-#parser.add_argument('--lr', type=float, default=0.01,
-#                    help='Initial learning rate.')
-#parser.add_argument('--weight_decay', type=float, default=5e-4,
-#                    help='Weight decay (L2 loss on parameters).')
-#parser.add_argument('--hidden', type=int, default=16,
-#                    help='Number of hidden units.')
-#parser.add_argument('--dropout', type=float, default=0.5,
-#                    help='Dropout rate (1 - keep probability).')
+
 #20220113
 parser.add_argument('--gt_root', default=os.path.abspath(os.path.join(os.pardir,'data/safegraph')),
                     help='Path to ground truth .csv files.')
@@ -50,18 +36,27 @@ parser.add_argument('--rel_result', default = False,
                     help='Whether retrieve results relative to no_vac.')
 
 args = parser.parse_args()
-print(args.rel_result)
-pdb.set_trace()
-#args.cuda = not args.no_cuda and torch.cuda.is_available()
+print('args.rel_result: ', args.rel_result)
+#pdb.set_trace()
 
 # Load data
 #vac_result_path = os.path.join(args.gt_root, args.msa_name, 'vac_results_SanFrancisco_0.02_200_randomseed66_30seeds_1000samples.csv') #20220113
 #vac_result_path = os.path.join(args.gt_root, args.msa_name, 'vac_results_SanFrancisco_0.02_100_randomseed66_30seeds_1000samples_proportional.csv') #20220118
-vac_result_path = os.path.join(args.gt_root, args.msa_name, 'vac_results_SanFrancisco_0.02_100_randomseed66_30seeds_1000samples_proportional.csv') #20220118
+#vac_result_path = os.path.join(args.gt_root, args.msa_name, 'test_vac_results_SanFrancisco_0.02_70_randomseed42_40seeds_1000samples_proportional.csv') #20220119
 
-msa_name_full = constants.MSA_NAME_FULL_DICT[args.msa_name]
+vac_result_path = os.path.join(args.gt_root, args.msa_name, 'vac_results_SanFrancisco_0.02_100_randomseed66_30seeds_1000samples_proportional_all.csv') #20220118
+if(not os.path.exists(vac_result_path)):
+    df_1 = pd.read_csv(os.path.join(args.gt_root, args.msa_name, 'vac_results_SanFrancisco_0.02_70_randomseed42_40seeds_1000samples_proportional.csv'))
+    df_2 = pd.read_csv(os.path.join(args.gt_root, args.msa_name, 'vac_results_SanFrancisco_0.02_70_randomseed42_40seeds_1000samples_proportional_latterpart.csv'))
+    df_combined = pd.concat([df_1, df_2], axis=0)
+    print(len(df_combined))
+    df_combined.reset_index(inplace=True, drop=True)
+    df_combined = df_combined.drop_duplicates(subset='Vaccinated_Idxs')
+    print(len(df_combined))
+    pdb.set_trace()
+    df_combined.to_csv(vac_result_path)
+    
 output_root = os.path.join(args.gt_root, args.msa_name)
-
 adj, node_feats, graph_labels, idx_train, idx_val, idx_test = load_data(vac_result_path=vac_result_path, #20220113
                                                                 dataset=f'safegraph-',
                                                                 msa_name=args.msa_name,
@@ -72,6 +67,20 @@ adj, node_feats, graph_labels, idx_train, idx_val, idx_test = load_data(vac_resu
                                                                 rel_result=False,
                                                                 ) 
 
+graph_labels = np.array(graph_labels)
+print('total_cases, max:',graph_labels[:,0].max())
+print('total_cases, min:', graph_labels[:,0].min())
+print('total_cases, max-min:',graph_labels[:,0].max()-graph_labels[:,0].min())
+print('total_cases, mean:',graph_labels[:,0].mean())
+print('total_cases, std:',graph_labels[:,0].std())
+
+if(graph_labels.shape[1]==4):
+    graph_name = 'total_cases_hist_grouped.png'
+else:
+    graph_name = 'total_cases_hist_notgrouped.png'
+visualization_save_path = os.path.join(args.gt_root, args.msa_name,graph_name)
+visualize(np.array(graph_labels[:,0]), bins=20, save_path=visualization_save_path)
+pdb.set_trace()
 
 # Extract useful node features
 cbg_sizes = np.array(node_feats[0,:,0])
@@ -79,11 +88,13 @@ cbg_elder_ratio = np.array(node_feats[0,:,1])
 cbg_household_income = np.array(node_feats[0,:,2])
 cbg_ew_ratio = np.array(node_feats[0,:,3])
 
-graph_labels = np.array(graph_labels)
-pdb.set_trace()
 # Normalization
-graph_labels[:,0] = preprocessing.robust_scale(graph_labels[:,0])
-graph_labels[:,1] = preprocessing.robust_scale(graph_labels[:,1])
+for i in range(graph_labels.shape[1]):
+    graph_labels[:,i] = preprocessing.robust_scale(graph_labels[:,i])
+#graph_labels[:,0] = preprocessing.robust_scale(graph_labels[:,0])
+#graph_labels[:,1] = preprocessing.robust_scale(graph_labels[:,1])
+#graph_labels[:,2] = preprocessing.robust_scale(graph_labels[:,2])
+#graph_labels[:,3] = preprocessing.robust_scale(graph_labels[:,3])
 
 # Calculate node centrality
 start = time.time(); print('Start graph construction..')
@@ -129,7 +140,7 @@ result_df = pd.DataFrame(columns=['Avg_Sizes','Avg_Elder_Ratio','Avg_Household_I
                                   'Std_Sizes','Std_Elder_Ratio','Std_Household_Income','Std_EW_Ratio',
                                   'Std_Deg_Centrality','Std_Bet_Centrality','Std_Clo_Centrality',
                                   'Std_Mob_Level',
-                                  'Total_Cases','Case_Rates_STD'])
+                                  'Total_Cases','Case_Rates_STD','Total_Deaths','Death_Rates_STD'])
 #pdb.set_trace()
 for i in range(num_samples):
     target_nodes = np.nonzero(np.array(node_feats[i,:,-1]))[0]
@@ -139,7 +150,7 @@ for i in range(num_samples):
                         np.std(cbg_sizes[target_nodes]),np.std(cbg_elder_ratio[target_nodes]),np.std(cbg_household_income[target_nodes]),np.mean(cbg_ew_ratio[target_nodes]),
                         np.std(deg_centrality[target_nodes]),np.std(bet_centrality[target_nodes]),np.std(clo_centrality[target_nodes]),
                         np.std(mob_level[target_nodes]),
-                        graph_labels[i,0], graph_labels[i,1]
+                        graph_labels[i,0], graph_labels[i,1], graph_labels[i,2], graph_labels[i,3],
                     ]
 print('Finish result_df construction. Time used: ',time.time()-start)
 print('result_df.shape: ', result_df.shape)
@@ -155,13 +166,18 @@ X = result_df[['Avg_Sizes','Avg_Elder_Ratio','Avg_Household_Income','Avg_EW_Rati
 X = sm.add_constant(X) # adding a constant
 Y1 = result_df['Total_Cases']
 Y2 = result_df['Case_Rates_STD']
-pdb.set_trace()
+Y3 = result_df['Total_Deaths']
+Y4 = result_df['Death_Rates_STD']
 
 model = sm.OLS(Y1,X).fit()
-#result = model.fit(X,Y1)
-print(model.summary())
+print('Total_Cases: \n', model.summary())
 
 model = sm.OLS(Y2,X).fit()
-#result = model.fit(X,Y2)
-print(model.summary())
+print('Case_Rates_STD: \n',model.summary())
+
+model = sm.OLS(Y3,X).fit()
+print('Total_Deaths: \n',model.summary())
+
+model = sm.OLS(Y4,X).fit()
+print('Death_Rates_STD: \n',model.summary())
 pdb.set_trace()

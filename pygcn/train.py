@@ -1,8 +1,8 @@
-import setproctitle
-setproctitle.setproctitle("gnn-simu-vac@chenlin")
-
 from __future__ import division
 from __future__ import print_function
+
+import setproctitle
+setproctitle.setproctitle("gnn-simu-vac@chenlin")
 
 import time
 import argparse
@@ -28,6 +28,9 @@ import sys
 sys.path.append(os.path.join(os.getcwd(), '../gt-generator'))
 import constants
 
+# 限制显卡使用
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
 #在命令行中输入参数了（先写参数名称，空格，再写参数的值）：python opp.py --height 5 --width 4 --length 3
 # https://blog.csdn.net/fjswcjswzy/article/details/105737647?utm_medium=distribute.pc_relevant.none-task-blog-2~default~baidujs_title~default-0.pc_relevant_paycolumn_v2&spm=1001.2101.3001.4242.1&utm_relevant_index=3
 
@@ -44,7 +47,7 @@ parser.add_argument('--lr', type=float, default=0.01,
                     help='Initial learning rate.')
 parser.add_argument('--weight_decay', type=float, default=5e-4,
                     help='Weight decay (L2 loss on parameters).')
-parser.add_argument('--hidden', type=int, default=16,
+parser.add_argument('--hidden', type=int, default=30, #100,#400, #default=16(original)
                     help='Number of hidden units.')
 parser.add_argument('--dropout', type=float, default=0.5,
                     help='Dropout rate (1 - keep probability).')
@@ -55,6 +58,11 @@ parser.add_argument('--msa_name',
                     help='MSA name.')
 parser.add_argument('--mob_data_root', default = '/data/chenlin/COVID-19/Data',
                     help='Path to mobility data.')
+#20220118
+parser.add_argument('--normalize', default = True,
+                    help='Whether normalize node features or not.')
+parser.add_argument('--rel_result', default = False,
+                    help='Whether retrieve results relative to no_vac.')
 
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -66,8 +74,9 @@ if args.cuda:
 
 # Load data
 #adj, features, labels, idx_train, idx_val, idx_test = load_data() #original
+#vac_result_path = os.path.join(args.gt_root, args.msa_name, 'vac_results_SanFrancisco_0.02_200_randomseed66_30seeds_500samples.csv') #20220113
+vac_result_path = os.path.join(args.gt_root, args.msa_name, 'test_vac_results_SanFrancisco_0.02_70_randomseed42_40seeds_1000samples_proportional.csv') #20220119
 
-vac_result_path = os.path.join(args.gt_root, args.msa_name, 'vac_results_SanFrancisco_0.02_200_randomseed66_30seeds_500samples.csv') #20220113
 msa_name_full = constants.MSA_NAME_FULL_DICT[args.msa_name]
 output_root = os.path.join(args.gt_root, args.msa_name)
 
@@ -75,70 +84,55 @@ adj, node_feats, graph_labels, idx_train, idx_val, idx_test = load_data(vac_resu
                                                                 dataset=f'safegraph-',
                                                                 msa_name=args.msa_name,
                                                                 mob_data_root=args.mob_data_root,
-                                                                output_root=output_root) 
+                                                                output_root=output_root,
+                                                                normalize=args.normalize,
+                                                                #rel_result=args.rel_result,
+                                                                rel_result=False,
+                                                                ) 
 
-
-'''
-#test
-num_graphs = 1 #test
-idx_train = torch.tensor([0])
-idx_val = torch.tensor([0])
-idx_test = torch.tensor([0])
-#perturbed_features = features
-#perturbed_features = [features + np.random.randn(features.shape[0], features.shape[1]) for i in range(num_graphs)] #test
-perturbed_node_feats = torch.zeros(num_graphs, node_feats.shape[0], node_feats.shape[1])
-for i in range(num_graphs):
-    perturbed_node_feats[i] = node_feats + torch.randn(node_feats.shape[0], node_feats.shape[1])
-graph_labels = torch.randn(num_graphs) #test
-'''
 
 
 # Model and optimizer
-'''
-#original
-model = GCN(nfeat=features.shape[1],
-            nhid=args.hidden,
-            nclass=labels.max().item() + 1,
-            dropout=args.dropout)
-'''
 config = Config()
-#config.gcn_nfeat = node_feats.shape[1] #num_feats #20220112
 config.gcn_nfeat = node_feats.shape[2] #num_feats #20220114
-config.gcn_nhid = args.hidden
-#config.gcn_nclass = labels.max().item() + 1 #original
-config.gcn_nclass = 8 #test #20220114
+#config.gcn_nhid = args.hidden #original
+config.gcn_nhid1 = args.hidden #20220119
+config.gcn_nhid2 = args.hidden #20220119
+#config.gcn_nhid3 = args.hidden #20220119
+config.gcn_nclass = 16 #100#200 #20220119 #8(20220114)
 config.gcn_dropout = args.dropout
-#config.linear_nin = node_feats.shape[0] #num_nodes #20220112
-config.linear_nin = node_feats.shape[1] #num_nodes #20220114
-config.linear_nhid1 = 64
-config.linear_nhid2 = 8
+#config.linear_nin = node_feats.shape[1] #num_nodes #20220114
+config.linear_nin = config.gcn_nclass #20220119
+config.linear_nhid1 = 8#64
+config.linear_nhid2 = 4
 config.linear_nout = 1
 
 model = get_model(config)
+print(model)
+#pdb.set_trace()
 
 optimizer = optim.Adam(model.parameters(),
                        lr=args.lr, weight_decay=args.weight_decay)
 
 random.seed(42)
 
+# small dataset, check network #20220119
+idx_train = idx_train#[:20]#[:100]
+idx_val = idx_val#[:2]#[:5]
+idx_test = idx_test#[:2]#[:5]
+
 if args.cuda:
     model.cuda()
-    #features = features.cuda() #original
-    #features = node_feats.cuda() #20220112
     adj = adj.cuda()
-    #labels = labels.cuda() #original
     idx_train = idx_train.cuda()
     idx_val = idx_val.cuda()
     idx_test = idx_test.cuda()
 
-    #perturbed_features = perturbed_features.cuda() #20220112
     node_feats = node_feats.cuda() #20220114
-    #node_feats = node_feats[:,:,1].cuda() #test, no use, 20220114
     #graph_labels = graph_labels.cuda() #20220112
     graph_labels = graph_labels[:,0].cuda() #20220114 #total_cases
     #graph_labels = graph_labels[:,1].cuda() #20220114 #case_std
 
-#pdb.set_trace()
 
 def train(epoch):
     t = time.time()
@@ -158,9 +152,9 @@ def train(epoch):
         #sample_idx_train = idx_train[i] #20220114
         sample_idx_train = idx_train[random.sample(range(len(idx_train)), 1)] #20220114
         #output = model(features, adj) #original
-        #gcn_output = model[0](perturbed_features[sample_idx_train].squeeze(), adj) #20220112
         gcn_output = model[0](node_feats[sample_idx_train].squeeze(), adj) #20220114
-        compressed = torch.mean(gcn_output, axis=1) #20220112
+        #compressed = torch.mean(gcn_output, axis=1) #20220112
+        compressed = torch.mean(gcn_output, axis=0) #20220119
         output = model[1](compressed)#20220112
         #loss_train = F.l1_loss(output, graph_labels[sample_idx_train.squeeze()]) #20220112
         loss_train = F.mse_loss(output.squeeze(), graph_labels[sample_idx_train.squeeze()]) #20220114
@@ -185,15 +179,14 @@ def train(epoch):
         loss_val_list = []
         for i in range(len(idx_val)):
             sample_idx_val = idx_val[i]
-            #gcn_output = model[0](perturbed_features[sample_idx_val].squeeze(), adj) #20220112
             gcn_output = model[0](node_feats[sample_idx_val].squeeze(), adj) #20220112
-            compressed = torch.mean(gcn_output, axis=1) #20220112
+            #compressed = torch.mean(gcn_output, axis=1) #20220112
+            compressed = torch.mean(gcn_output, axis=0) #20220119
             output = model[1](compressed)
 
             #loss_val = F.l1_loss(output, graph_labels[sample_idx_val]) #20220112
             loss_val = F.mse_loss(output.squeeze(), graph_labels[sample_idx_val]) #20220114
             
-
             output_val_list.append(output.item())
             truth_val_list.append(graph_labels[sample_idx_val.squeeze()].item())
             loss_val_list.append(loss_val.item())
@@ -226,7 +219,8 @@ def test():
     for i in range(len(idx_test)):
         sample_idx_test = idx_test[i]
         gcn_output = model[0](node_feats[sample_idx_test].squeeze(), adj) #20220112
-        compressed = torch.mean(gcn_output, axis=1) #20220112
+        #compressed = torch.mean(gcn_output, axis=1) #20220112
+        compressed = torch.mean(gcn_output, axis=0) #20220119
         output = model[1](compressed)
         #loss_test = F.l1_loss(output, graph_labels[sample_idx_test.squeeze()]) #20220112
         loss_test = F.mse_loss(output.squeeze(), graph_labels[sample_idx_test.squeeze()]) #20220114

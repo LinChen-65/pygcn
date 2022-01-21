@@ -1,4 +1,5 @@
-from re import M
+#from re import M
+#from this import s
 import numpy as np
 import scipy.sparse as sp
 import torch
@@ -10,6 +11,7 @@ import pickle
 import pdb
 import time
 from sklearn import preprocessing
+import matplotlib.pyplot as plt
 
 sys.path.append(os.path.join(os.getcwd(), '../gt-generator'))
 import constants
@@ -27,33 +29,50 @@ def encode_onehot(labels):
 def load_vac_results(vac_result_path, rel_result): #20220117, 拆分代码
     df = pd.read_csv(vac_result_path)
     num_samples = len(df)-1 #第0行是no_vaccination的结果
+
     # graph_labels
-    # 把str转为list，split flag是', '，然后再把其中每个元素由str转为int(用map函数)
-    
     # no_vaccination
     #df['Vaccinated_Idxs'][0] = [] 
-    final_cases_no_vac = df['Total_Cases'].loc[0]
-    case_rate_std_no_vac = df['Case_Rates_STD'].loc[0]
+    try:
+        final_cases_no_vac = df['Total_Cases'].loc[0]
+        case_rate_std_no_vac = df['Case_Rates_STD'].loc[0]
+        final_deaths_no_vac = df['Total_Deaths'].loc[0]
+        death_rate_std_no_vac = df['Death_Rates_STD'].loc[0]
+    except:
+        pass
     
-    #df['Vaccinated_Idxs'][1:] = df['Vaccinated_Idxs'][1:].apply(lambda x : list(map(int, (x.strip('[').strip(']').split(', ')))))
-    #graph_labels = torch.FloatTensor(np.array(pd.DataFrame(df[1:],columns=['Total_Cases','Case_Rates_STD'])))
+    # vaccination results
     df = df[1:]
+    # 把str转为list，split flag是', '，然后再把其中每个元素由str转为int(用map函数)
     df['Vaccinated_Idxs'] = df['Vaccinated_Idxs'].apply(lambda x : list(map(int, (x.strip('[').strip(']').split(', ')))))
-    graph_labels = torch.FloatTensor(np.array(pd.DataFrame(df,columns=['Total_Cases','Case_Rates_STD'])))
+    
+    if('Total_Deaths' in df.columns):
+        graph_labels = torch.FloatTensor(np.array(pd.DataFrame(df,columns=['Total_Cases','Case_Rates_STD','Total_Deaths','Death_Rates_STD'])))
+    else:
+        graph_labels = torch.FloatTensor(np.array(pd.DataFrame(df,columns=['Total_Cases','Case_Rates_STD'])))
+    
     if(rel_result):
         print('rel_result=True')
-        #graph_labels[:,0] = (graph_labels[:,0]-final_cases_no_vac)/final_cases_no_vac
-        #graph_labels[:,1] = (graph_labels[:,1]-case_rate_std_no_vac)/case_rate_std_no_vac
         graph_labels[:,0] = (graph_labels[:,0]-final_cases_no_vac)
         graph_labels[:,1] = (graph_labels[:,1]-case_rate_std_no_vac)
+        if(graph_labels.shape[1]==4):
+            graph_labels[:,2] = (graph_labels[:,2]-final_deaths_no_vac)
+            graph_labels[:,3] = (graph_labels[:,3]-death_rate_std_no_vac)
+
     else:
         print('rel_result=False')
 
     # idx_train, idx_val, idx_test
     # Split train, val, test
-    idx_train = range(int(0.8*num_samples))
-    idx_val = range(int(0.8*num_samples), int(0.9*num_samples))
-    idx_test = range(int(0.9*num_samples), int(num_samples))
+    #idx_train = range(int(0.8*num_samples))
+    #idx_val = range(int(0.8*num_samples), int(0.9*num_samples))
+    #idx_test = range(int(0.9*num_samples), int(num_samples))
+    shuffled = np.arange(num_samples)
+    np.random.shuffle(shuffled) #20220119
+    idx_train = shuffled[:int(0.8*num_samples)]
+    idx_val = shuffled[int(0.8*num_samples):int(0.9*num_samples)]
+    idx_test = shuffled[int(0.9*num_samples):]
+
     # Wrap in tensor 
     idx_train = torch.LongTensor(idx_train)
     idx_val = torch.LongTensor(idx_val)
@@ -72,6 +91,7 @@ def load_adj(msa_name,mob_data_root,output_root): #20220117, 拆分代码
         num_cbgs = adj.shape[0]
     else:
         # Load POI-CBG visiting matrices
+        msa_name_full = constants.MSA_NAME_FULL_DICT[msa_name]
         mob_data_path = os.path.join(mob_data_root, msa_name, '%s_2020-03-01_to_2020-05-02.pkl' % msa_name_full)
         f = open(mob_data_path, 'rb') 
         poi_cbg_visits_list = pickle.load(f)
@@ -107,7 +127,9 @@ def load_adj(msa_name,mob_data_root,output_root): #20220117, 拆分代码
     
 
 def load_pretrained_embed(): #20220117, 拆分代码
-    pretrained_embed = np.load('/data/chenlin/code-dynalearn/scripts/figure-6/gt-generator/covid/outputs/node_embeddings_b1.0.npy')
+    #pretrained_embed = np.load('/data/chenlin/code-dynalearn/scripts/figure-6/gt-generator/covid/outputs/node_embeddings_b1.0.npy')
+    pretrained_embed = np.load('/home/chenlin/code-dynalearn/scripts/figure-6/gt-generator/covid/outputs/node_embeddings_b1.0.npy')
+    
     num_embed = pretrained_embed.shape[1]
     # normalization
     pretrained_embed = preprocessing.robust_scale(pretrained_embed)
@@ -240,7 +262,9 @@ def load_data(vac_result_path="../data/cora/", dataset="cora", msa_name=None, mo
 
         # node_feats
         # pretrained_embed
-        pretrained_embed, num_embed = load_pretrained_embed()
+        pretrained_embed, num_embed = load_pretrained_embed() #暂时注释20220120
+        #pretrained_embed = np.zeros(num_samples) #暂时注释20220120
+        #num_embed = 1 #暂时注释20220120
         # cbg population and other demographic features
         cbg_sizes, cbg_elder_ratio, cbg_household_income, cbg_ew_ratio = load_cbg_demographics(msa_name, mob_data_root, normalize)
         node_feats = np.zeros(((num_samples, num_cbgs, 5+num_embed)))
@@ -330,3 +354,9 @@ def sparse_mx_to_torch_sparse_tensor(sparse_mx):
     values = torch.from_numpy(sparse_mx.data)
     shape = torch.Size(sparse_mx.shape)
     return torch.sparse.FloatTensor(indices, values, shape)
+
+def visualize(data, bins, save_path): #20220119
+    plt.figure()
+    plt.hist(data, bins=bins)
+    plt.savefig(save_path)
+    print('Figure saved at: ', save_path)
