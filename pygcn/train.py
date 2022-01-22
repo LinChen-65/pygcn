@@ -12,8 +12,6 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 
-#from pygcn.utils import load_data, accuracy #original
-#from pygcn.models import GCN #original
 from utils import load_data, accuracy #20220112
 from models import GCN # #20220112
 
@@ -73,7 +71,6 @@ if args.cuda:
     torch.cuda.manual_seed(args.seed)
 
 # Load data
-#adj, features, labels, idx_train, idx_val, idx_test = load_data() #original
 #vac_result_path = os.path.join(args.gt_root, args.msa_name, 'vac_results_SanFrancisco_0.02_200_randomseed66_30seeds_500samples.csv') #20220113
 vac_result_path = os.path.join(args.gt_root, args.msa_name, 'test_vac_results_SanFrancisco_0.02_70_randomseed42_40seeds_1000samples_proportional.csv') #20220119
 
@@ -117,9 +114,9 @@ optimizer = optim.Adam(model.parameters(),
 random.seed(42)
 
 # small dataset, check network #20220119
-idx_train = idx_train#[:20]#[:100]
-idx_val = idx_val#[:2]#[:5]
-idx_test = idx_test#[:2]#[:5]
+idx_train = idx_train[:16]#[:20]#[:100]
+idx_val = idx_val[:16]#[:2]#[:5]
+idx_test = idx_test[:16]#[:2]#[:5]
 
 if args.cuda:
     model.cuda()
@@ -140,7 +137,6 @@ def train(epoch):
 
     #sample_idx_train = idx_train[random.sample(range(len(idx_train)), 1)] #20220114
     #sample_idx_val = idx_val[random.sample(range(len(idx_val)), 1)] #20220114
-    
     #optimizer.zero_grad() #original
 
     output_train_list = []
@@ -196,7 +192,6 @@ def train(epoch):
         #    print(loss_val)
         #    return True
         
-        #if(epoch==110):
         if(epoch%100==0):
             print('Epoch: {:04d}'.format(epoch+1),
                 #'loss_train: {:.4f}'.format(loss_train.item()),
