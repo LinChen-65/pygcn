@@ -16,21 +16,63 @@ class GCN(nn.Module):
         super(GCN, self).__init__()
 
         self.gc1 = GraphConvolution(nfeat, nhid)
-        #self.gc2 = GraphConvolution(nhid1, nhid2) #20220119
-        self.gc2 = GraphConvolution(nhid, nclass)
+
+        #self.gc2 = GraphConvolution(nhid, nclass) #如果gc2是output layer
+        self.gc2 = GraphConvolution(nhid, nhid) #20220122
+
+        #self.gc3 = GraphConvolution(nhid, nclass) #20220122 #如果gc3是output layer
+        self.gc3 = GraphConvolution(nhid, nhid) #20220122
+
+        #self.gc4 = GraphConvolution(nhid, nclass) #20220122 #如果gc4是output layer
+        self.gc4 = GraphConvolution(nhid, nhid) #20220122
+
+        self.gc5 = GraphConvolution(nhid, nclass) #20220122 #如果gc5是output layer
+        #self.gc5 = GraphConvolution(nhid, nhid) #20220122
+
+        #self.gc6 = GraphConvolution(nhid, nclass) #20220122 #如果gc6是output layer
+
         self.dropout = dropout
 
+    def apply_bn(self, x): #20220122 #BatchNorm
+        ''' Batch normalization of 3D tensor x
+        '''
+        bn_module = nn.BatchNorm1d(x.size()[1]).cuda()
+        return bn_module(x)
+
     def forward(self, x, adj):
-        x = F.relu(self.gc1(x, adj)) #original
-        #x = F.leaky_relu(self.gc1(x, adj)) #20220121 #没用
-        x = F.dropout(x, self.dropout, training=self.training)
-        #x = F.relu(self.gc2(x, adj))
+        #x = F.relu(self.gc1(x, adj)) #original #(20220121)leaky_relu也没用
+        #x = self.apply_bn(x) #20220122 #BatchNorm
+        #x = F.relu(self.apply_bn(self.gc1(x, adj))) #20220122 #先BatchNorm再activate
+        x = self.apply_bn(F.relu(self.gc1(x, adj))) #20220122 #先activate再BatchNorm
         #x = F.dropout(x, self.dropout, training=self.training)
-        x = self.gc2(x, adj)
+
+        #x = self.gc2(x, adj) #如果gc2是output layer
+        #x = F.relu(self.gc2(x, adj))
+        #x = self.apply_bn(x) #20220122 #BatchNorm
+        #x = F.relu(self.apply_bn(self.gc2(x, adj))) #20220122 #先BatchNorm再activate
+        x = self.apply_bn(F.relu(self.gc2(x, adj))) #20220122 #先activate再BatchNorm
+        #x = F.dropout(x, self.dropout, training=self.training)
+
+        #x = self.gc3(x, adj) #如果gc3是output layer
+        #x = F.relu(self.gc3(x, adj)) #如果gc3是output layer
+        #x = F.dropout(x, self.dropout, training=self.training)
+        #x = F.relu(self.apply_bn(self.gc3(x, adj))) #20220122 #先BatchNorm再activate
+        x = self.apply_bn(F.relu(self.gc3(x, adj))) #20220122 #先activate再BatchNorm
+
+        #x = F.relu(self.gc4(x, adj)) #如果gc4是output layer
+        #x = F.relu(self.apply_bn(self.gc4(x, adj))) #20220122 #先BatchNorm再activate
+        x = self.apply_bn(F.relu(self.gc4(x, adj))) #20220122 #先activate再BatchNorm
+
+        x = F.relu(self.gc5(x, adj)) #如果gc5是output layer
+        #x = F.relu(self.apply_bn(self.gc5(x, adj))) #20220122 #先BatchNorm再activate
+
+        #x = F.relu(self.gc6(x, adj)) #如果gc6是output layer
+        
         #return F.log_softmax(x, dim=1) #original #cannot converge
         #return x #20220121 #when test, output identical values close to 0
         #return F.relu(x) #20220121 #when train, loss=nan, 调小lr可以缓解
         return x
+
 
 class LinearLayers(nn.Module): #20220112
     def __init__(self, nin, nhid1, nhid2, nout=1, activation="relu", bias=True):
@@ -54,11 +96,21 @@ class MLPLayers(nn.Module): #20220120
         self.linear1 = Linear(nin, nhid1, bias=self.bias)
         self.linear2 = Linear(nhid1, nhid2, bias=self.bias)
         self.linear3 = Linear(nhid2, nout, bias=self.bias)
+        #torch.nn.init.kaiming_uniform_(self.linear1.weight) #20220122
+        #torch.nn.init.kaiming_uniform_(self.linear2.weight) #20220122
+        #torch.nn.init.kaiming_uniform_(self.linear3.weight) #20220122
+
+    def apply_bn(self, x): #20220122 #BatchNorm
+        ''' Batch normalization of 3D tensor x
+        '''
+        bn_module = nn.BatchNorm1d(x.size()[1]).cuda()
+        return bn_module(x)
 
     def forward(self, x):
-        #pdb.set_trace()
         x = F.relu(self.linear1(x))
+        #x = F.relu(self.apply_bn(self.linear1(x))) #20220122 #先BatchNorm再activate
         x = F.relu(self.linear2(x))
+        #x = F.relu(self.apply_bn(self.linear2(x))) #20220122 #先BatchNorm再activate
         x = self.linear3(x)
         return x
 
@@ -68,7 +120,6 @@ class PoolLayer(nn.Module): #20220120
         nn.Module.__init__(self)
 
     def forward(self, x):
-        #pdb.set_trace()
         x = ((x.T)*(x[:,:,-1].T)).T #mask
         x_avg =  (torch.sum(x[:,:,:-1],axis=1)/(len(torch.nonzero(x[0,:,-1],as_tuple=True)[0])))
         #x_std = 

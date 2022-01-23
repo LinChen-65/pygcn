@@ -24,9 +24,12 @@ class GraphConvolution(Module):
 
     def reset_parameters(self):
         stdv = 1. / math.sqrt(self.weight.size(1))
-        self.weight.data.uniform_(-stdv, stdv)
+        #self.weight.data.uniform_(-stdv, stdv) #original
+        #torch.nn.init.xavier_normal_(self.weight) #20220122
+        torch.nn.init.kaiming_uniform_(self.weight) #20220122
         if self.bias is not None:
             self.bias.data.uniform_(-stdv, stdv)
+        
 
     def forward(self, input, adj):
         support = torch.mm(input, self.weight)

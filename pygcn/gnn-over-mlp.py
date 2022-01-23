@@ -140,7 +140,7 @@ config.gcn_nhid = args.hidden #original
 #config.gcn_nhid1 = args.hidden #20220119
 #config.gcn_nhid2 = args.hidden #20220119
 #config.gcn_nhid3 = args.hidden #20220119
-config.gcn_nclass = 50 #8 #16 #100#200 #20220119 #8(20220114)
+config.gcn_nclass = 32 #50 #8 #16 #100#200 #20220119 #8(20220114)
 config.gcn_dropout = args.dropout
 config.linear_nin = config.gcn_nclass-1 #(node_feats.shape[2]-1)#*2 #num_feats
 config.linear_nhid1 = 100 #8#64
@@ -155,13 +155,15 @@ print(model)
 
 optimizer = optim.Adam(model.parameters(),
                        lr=args.lr, weight_decay=args.weight_decay)
+#scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=70, gamma=0.1) #20220122
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer,'min',factor=0.5, patience=6, min_lr=1e-8, verbose=True) #20220122
 
 random.seed(42)
 
 # small dataset, check network #20220119
-idx_train = idx_train[:16]#[:20]#[:100]
-idx_val = idx_val[:16]#[:2]#[:5]
-idx_test = idx_test[:16]#[:2]#[:5]
+#idx_train = idx_train[:4]#[:20]#[:100]
+#idx_val = idx_val[:4]#[:2]#[:5]
+#idx_test = idx_test[:4]#[:2]#[:5]
 
 if args.cuda:
     model.cuda()
@@ -177,19 +179,20 @@ if args.cuda:
 
 
 def data_loader(dataset, batch_size):
+    #train_dataset, val_dataset, test_dataset = random_split(dataset, [4,2,2])
     train_dataset, val_dataset, test_dataset = random_split(dataset, [int(0.8*num_samples), int(0.1*num_samples), int(0.1*num_samples)])
     train_loader = DataLoader(
         train_dataset, #train_dataset.dataset,
         batch_size=batch_size,
         shuffle=True)
     val_loader = DataLoader(
-        val_dataset,#val_dataset.dataset,
+        val_dataset, #val_dataset.dataset,
         batch_size=batch_size,
         shuffle=True)
     test_loader = DataLoader(
         test_dataset,#test_dataset.dataset,
         batch_size=batch_size,
-        shuffle=True)
+        shuffle=False) #shuffle=True)
     return train_loader, val_loader, test_loader 
 
 
@@ -203,6 +206,7 @@ def train(epoch,min_valid_loss):
         output = model(batch_x, adj) #20220121
         loss = F.mse_loss(output.squeeze(), batch_y)
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.1, norm_type=2) #20220122 #gradient clipping
         optimizer.step()
         train_loss += loss.item()
 
@@ -221,7 +225,7 @@ def train(epoch,min_valid_loss):
     if min_valid_loss > valid_loss:
         print(f'Validation Loss Decreased({min_valid_loss:.6f}--->{valid_loss:.6f}) \t Saving The Model')
         min_valid_loss = valid_loss
-    return min_valid_loss     
+    return (train_loss/len(train_loader)), (valid_loss/len(val_loader)),min_valid_loss     
         
 def test(loader):
     model.eval()
@@ -243,33 +247,37 @@ def test(loader):
     print(f'test loss: {test_loss / len(loader)}')
     print('output_test_list: ', output_test_list)
     print('truth_test_list: ', truth_test_list)
-    pdb.set_trace()
+    #pdb.set_trace()
 
 
 # Wrap data into DataLoader
+#num_samples_used = 8; print('num_samples_used: ', num_samples_used) #20220122
+#dataset = torch.utils.data.TensorDataset(node_feats[:num_samples_used,:,:],graph_labels[:num_samples_used]) #20220122
 dataset = torch.utils.data.TensorDataset(node_feats,graph_labels)
-train_loader, val_loader, test_loader = data_loader(dataset,batch_size=32) #batch_size=20
+train_loader, val_loader, test_loader = data_loader(dataset,batch_size=20) #batch_size=20
 
 # Train model
 t_total = time.time()
-min_valid_loss = np.inf
+min_val_loss = np.inf
+train_loss_record = []
+val_loss_record = []
 for epoch in range(args.epochs):
-    min_valid_loss = train(epoch,min_valid_loss)
+    train_loss, val_loss, min_val_loss = train(epoch,min_val_loss)
+    train_loss_record.append(train_loss)
+    val_loss_record.append(val_loss)
+    scheduler.step(train_loss) #val_loss
+    #scheduler.step()
+    #lr = scheduler.get_lr()
+    #print(epoch, scheduler.get_lr()[0])
+    #test(test_loader)
+    #pdb.set_trace()
 
 print("Optimization Finished!")
 print("Total time elapsed: {:.4f}s".format(time.time() - t_total))
+print('train_loss_record: ',train_loss_record)
+print('val_loss_record: ',val_loss_record)
 pdb.set_trace()
 
 # Testing
 test(test_loader)
-
-
-
-
-
-
-
-
-
-
 
