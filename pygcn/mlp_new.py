@@ -1,3 +1,5 @@
+# python mlp_new.py --rel_result --msa_name SanFrancisco --prefix /data
+
 import setproctitle
 setproctitle.setproctitle("gnn-simu-vac@chenlin")
 
@@ -12,19 +14,17 @@ import pandas as pd
 import statsmodels.api as sm
 from statsmodels.stats.outliers_influence import summary_table
 from sklearn import preprocessing
+import matplotlib.pyplot as plt
+import seaborn as sns
+import time
+import pdb
 
 sys.path.append(os.path.join(os.getcwd(), '../gt-generator'))
 import constants
 
-import time
-import pdb
-
-import matplotlib.pyplot as plt
-import seaborn as sns
-
 ## 输出图显示中文
-from matplotlib.font_manager import FontProperties
-fonts = FontProperties(fname = "/Library/Fonts/华文细黑.ttf",size=14)
+#from matplotlib.font_manager import FontProperties
+#fonts = FontProperties(fname = "/Library/Fonts/华文细黑.ttf",size=14)
 
 from sklearn import metrics
 from sklearn.model_selection import train_test_split
@@ -35,7 +35,6 @@ import statsmodels.api as sm
 import statsmodels.formula.api as smf
 from sklearn.neural_network import MLPRegressor
 from sklearn.preprocessing import StandardScaler
-
 
 
 # Training settings
@@ -51,8 +50,11 @@ parser.add_argument('--mob_data_root', default = '/data/chenlin/COVID-19/Data',
 #20220118
 parser.add_argument('--normalize', default = True,
                     help='Whether normalize node features or not.')
-parser.add_argument('--rel_result', default = False,
+parser.add_argument('--rel_result', default = False, action='store_true',
                     help='Whether retrieve results relative to no_vac.')
+#20220123
+parser.add_argument('--prefix', default= '/home', 
+                    help='Prefix of data root. /home for rl4, /data for dl3.')
 
 args = parser.parse_args()
 print('args.rel_result: ', args.rel_result)
@@ -63,14 +65,16 @@ print('args.rel_result: ', args.rel_result)
 vac_result_path = os.path.join(args.gt_root, args.msa_name, 'vac_results_SanFrancisco_0.02_70_randomseed42_40seeds_1000samples_proportional.csv') #20220119
     
 output_root = os.path.join(args.gt_root, args.msa_name)
+pretrain_embed_path = os.path.join(args.prefix,'chenlin/code-dynalearn/scripts/figure-6/gt-generator/covid/outputs/node_embeddings_b1.0.npy' )
+
 adj, node_feats, graph_labels, idx_train, idx_val, idx_test = load_data(vac_result_path=vac_result_path, #20220113
                                                                 dataset=f'safegraph-',
                                                                 msa_name=args.msa_name,
                                                                 mob_data_root=args.mob_data_root,
                                                                 output_root=output_root,
+                                                                pretrain_embed_path=pretrain_embed_path,
                                                                 normalize=args.normalize,
-                                                                #rel_result=args.rel_result,
-                                                                rel_result=True,#False,
+                                                                rel_result=args.rel_result,
                                                                 ) 
 
 graph_labels = np.array(graph_labels)
@@ -125,12 +129,11 @@ mob_max = np.max(mob_level)
 # Normalization
 #mob_level /= mob_max
 
-#pdb.set_trace()
 
 # Concatenate CBG features
 # population, age, income, occupation, deg_cent, bet_cent, clo_cent
 start = time.time(); print('Start constructing result_df..')
-num_samples = len(idx_train)
+num_samples = len(idx_train)+len(idx_val)+len(idx_test) #20220123
 result_df = pd.DataFrame(columns=['Avg_Sizes','Avg_Elder_Ratio','Avg_Household_Income','Avg_EW_Ratio',
                                   'Avg_Deg_Centrality','Avg_Bet_Centrality','Avg_Clo_Centrality',
                                   'Avg_Mob_Level',
@@ -151,7 +154,6 @@ for i in range(num_samples):
                     ]
 print('Finish result_df construction. Time used: ',time.time()-start)
 print('result_df.shape: ', result_df.shape)
-#pdb.set_trace()
 data = result_df
 
 ## 准备自变量和因变量
@@ -172,8 +174,12 @@ print(lm.summary())
 ## 检查模型在测试集上的预测效果
 test_xadd = sm.add_constant(test_x)  ## 添加常数项
 pre_y = lm.predict(test_xadd)
+print('Linear regression: ')
 print("mean absolute error:", metrics.mean_absolute_error(test_y,pre_y))
 print("mean squared error:", metrics.mean_squared_error(test_y,pre_y))
+print('pred: ', pre_y.tolist())
+print('true: ', test_y.tolist())
+pdb.set_trace()
 
 ## 使用sklearn库进行MLP回归分析
 ## 定义含有4个隐藏层的MLP网络
@@ -202,6 +208,7 @@ plt.show()
 
 ## 对测试集上进行预测
 pre_y = mlpr.predict(test_x)
+print('MLP: ')
 print("mean absolute error:", metrics.mean_absolute_error(test_y,pre_y))
 print("mean squared error:", metrics.mean_squared_error(test_y,pre_y))
 ## 输出在测试集上的R^2

@@ -90,7 +90,7 @@ class LinearLayers(nn.Module): #20220112
         
 
 class MLPLayers(nn.Module): #20220120
-    def __init__(self, nin, nhid1, nhid2, nout=1, activation="relu", bias=True):
+    def __init__(self, nin, nhid1, nhid2, nout=1, activation='relu', bias=True):
         nn.Module.__init__(self)
         self.bias = bias
         self.linear1 = Linear(nin, nhid1, bias=self.bias)
@@ -122,7 +122,7 @@ class PoolLayer(nn.Module): #20220120
     def forward(self, x):
         x = ((x.T)*(x[:,:,-1].T)).T #mask
         x_avg =  (torch.sum(x[:,:,:-1],axis=1)/(len(torch.nonzero(x[0,:,-1],as_tuple=True)[0])))
-        #x_std = 
+
         #x_avg =  torch.mean(x[torch.nonzero(x[:,:,-1],as_tuple=True)[0],torch.nonzero(x[:,:,-1],as_tuple=True)[1],:-1], axis=0).unsqueeze(axis=1)
         #x_std =  torch.std(x[torch.nonzero(x[:,:,-1],as_tuple=True)[0],torch.nonzero(x[:,:,-1],as_tuple=True)[1],:-1], axis=0).unsqueeze(axis=1)
         
@@ -142,17 +142,21 @@ class GCN_OVER_MLP(nn.Module): #20220121
         self.GCNLayer = GCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout)
         self.PoolLayer = PoolLayer()
         self.MLPLayers = MLPLayers(config.linear_nin, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_activation, config.linear_bias)
-    
+        self.dim_touched = config.dim_touched
+
     def forward(self, x, adj):
         #x = self.GCNLayer.forward(x, adj) 
         for i in range(x.shape[0]): #暂时无法批处理，只能土法循环  #20220121
-            this_output = self.GCNLayer.forward(x[i,:,:-1], adj) #最后一维标记是否免疫，不要动
+            #this_output = self.GCNLayer.forward(x[i,:,:-1], adj) #最后一维标记是否免疫，不要动
+            this_output = self.GCNLayer.forward(x[i,:,:self.dim_touched], adj) #20220123
             if(i==0):
                 all_gcn_output = this_output.clone()
             elif(i==1):
                 all_gcn_output = torch.stack((all_gcn_output,this_output),dim=0)
             else:
                 all_gcn_output = torch.cat((all_gcn_output,this_output.unsqueeze(dim=0)), dim=0)
+        
+        all_gcn_output = torch.cat((all_gcn_output, x[:,:,self.dim_touched:]), dim=2) #20220123
         #pdb.set_trace()
         x = self.PoolLayer.forward(all_gcn_output)
         x = self.MLPLayers.forward(x)

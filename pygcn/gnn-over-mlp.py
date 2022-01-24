@@ -1,3 +1,4 @@
+from pprint import PrettyPrinter
 import setproctitle
 setproctitle.setproctitle("gnn-simu-vac@chenlin")
 
@@ -56,8 +57,13 @@ parser.add_argument('--mob_data_root', default = '/data/chenlin/COVID-19/Data',
 #20220118
 parser.add_argument('--normalize', default = True,
                     help='Whether normalize node features or not.')
-parser.add_argument('--rel_result', default = False,
+parser.add_argument('--rel_result', default = False, action='store_true',
                     help='Whether retrieve results relative to no_vac.')
+#20220123
+parser.add_argument('--quicktest', default= False, action='store_true',
+                    help='Whether use a small dataset to quickly test the model.')
+parser.add_argument('--prefix', default= '/home', 
+                    help='Prefix of data root. /home for rl4, /data for dl3.')
 
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -66,17 +72,20 @@ torch.manual_seed(args.seed)
 if args.cuda:
     torch.cuda.manual_seed(args.seed)
 print('args.rel_result: ', args.rel_result)
+print('args.quicktest: ', args.quicktest)
 
 
 # Load data
 vac_result_path = os.path.join(args.gt_root, args.msa_name, 'vac_results_SanFrancisco_0.02_70_randomseed42_40seeds_1000samples_proportional.csv') #20220120
-    
 output_root = os.path.join(args.gt_root, args.msa_name)
+pretrained_embed_path = os.path.join(args.prefix,'chenlin/code-dynalearn/scripts/figure-6/gt-generator/covid/outputs/node_embeddings_b1.0.npy' )
+
 adj, node_feats, graph_labels, idx_train, idx_val, idx_test = load_data(vac_result_path=vac_result_path, #20220113
                                                                 dataset=f'safegraph-',
                                                                 msa_name=args.msa_name,
                                                                 mob_data_root=args.mob_data_root,
                                                                 output_root=output_root,
+                                                                pretrain_embed_path=pretrained_embed_path,
                                                                 normalize=args.normalize,
                                                                 rel_result=args.rel_result,
                                                                 ) 
@@ -125,9 +134,16 @@ clo_centrality = torch.Tensor(np.tile(clo_centrality,(num_samples,1))).unsqueeze
 bet_centrality = torch.Tensor(np.tile(bet_centrality,(num_samples,1))).unsqueeze(axis=2) #20220120
 mob_level = torch.Tensor(np.tile(mob_level,(num_samples,1))).unsqueeze(axis=2) #20220120
 vac_flag = node_feats[:,:,-1].unsqueeze(axis=2)
-#node_feats = np.concatenate((node_feats[:,:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag), axis=2)
-node_feats = np.concatenate((node_feats[:,:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag, vac_flag), axis=2) #20220121
-print('node_feats.shape: ', node_feats.shape) # (990, 2943, 9) 最后一维1=vac，0=no_vac
+
+# 无pretrain_embed，不拼接原始特征，仅把GCN output embedding和vac flag输入MLP layers #目前采用这个
+#node_feats = np.concatenate((node_feats[:,:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag, vac_flag), axis=2) #20220121
+# 无pretrain_embed，把原始特征拼接在GCN output embedding上再输入MLP layers
+#node_feats = np.concatenate((node_feats[:,:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag, 
+#                             node_feats[:,:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag), axis=2) #20220123
+# 有pretrain_embed，不拼接原始特征
+node_feats = np.concatenate((node_feats, deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag, vac_flag), axis=2) #20220123
+
+print('node_feats.shape: ', node_feats.shape) #(990, 2943, 9) 最后一维1=vac，0=no_vac #(990, 2943, 16) 最后一维1=vac，0=no_vac
 
 node_feats = torch.Tensor(node_feats)
 adj = torch.Tensor(adj)
@@ -135,14 +151,14 @@ graph_labels = torch.Tensor(graph_labels)
 
 # Model and optimizer
 config = Config()
-config.gcn_nfeat = node_feats.shape[2]-1 #num_feats #20220114
-config.gcn_nhid = args.hidden #original
-#config.gcn_nhid1 = args.hidden #20220119
-#config.gcn_nhid2 = args.hidden #20220119
-#config.gcn_nhid3 = args.hidden #20220119
+config.dim_touched = 9 # Num of feats used to calculate embedding #20220123
+#config.gcn_nfeat = node_feats.shape[2]-1 #num_feats #20220114
+config.gcn_nfeat = config.dim_touched # Num of feats used to calculate embedding #20220123
+config.gcn_nhid = args.hidden 
 config.gcn_nclass = 32 #50 #8 #16 #100#200 #20220119 #8(20220114)
 config.gcn_dropout = args.dropout
-config.linear_nin = config.gcn_nclass-1 #(node_feats.shape[2]-1)#*2 #num_feats
+#config.linear_nin = config.gcn_nclass-1 #(node_feats.shape[2]-1)#*2 #num_feats
+config.linear_nin = config.gcn_nclass-1 + (node_feats.shape[2]-config.dim_touched)
 config.linear_nhid1 = 100 #8#64
 config.linear_nhid2 = 100
 config.linear_nout = 1
@@ -151,7 +167,6 @@ config.linear_nout = 1
 #model = get_model(config, 'MLP')
 model = get_model(config, 'GNN_OVER_MLP')
 print(model)
-#pdb.set_trace()
 
 optimizer = optim.Adam(model.parameters(),
                        lr=args.lr, weight_decay=args.weight_decay)
@@ -179,8 +194,10 @@ if args.cuda:
 
 
 def data_loader(dataset, batch_size):
-    #train_dataset, val_dataset, test_dataset = random_split(dataset, [4,2,2])
-    train_dataset, val_dataset, test_dataset = random_split(dataset, [int(0.8*num_samples), int(0.1*num_samples), int(0.1*num_samples)])
+    if(args.quicktest):
+        train_dataset, val_dataset, test_dataset = random_split(dataset, [4,2,2])
+    else:
+        train_dataset, val_dataset, test_dataset = random_split(dataset, [int(0.8*num_samples), int(0.1*num_samples), int(0.1*num_samples)])
     train_loader = DataLoader(
         train_dataset, #train_dataset.dataset,
         batch_size=batch_size,
@@ -200,7 +217,6 @@ def train(epoch,min_valid_loss):
     train_loss = 0.0
     model.train()
     for (batch_x, batch_y) in train_loader:
-        #pdb.set_trace()
         optimizer.zero_grad()
         #output = model(batch_x) #20220120
         output = model(batch_x, adj) #20220121
@@ -216,7 +232,6 @@ def train(epoch,min_valid_loss):
         valid_loss = 0.0
         model.eval()
         for (batch_x, batch_y) in val_loader:
-            #output = model(batch_x) #20220120
             output = model(batch_x, adj) #20220121
             loss= F.mse_loss(output.squeeze(), batch_y)
             valid_loss += loss.item()
@@ -233,7 +248,6 @@ def test(loader):
     output_test_list = []
     truth_test_list = []
     for (batch_x, batch_y) in loader:
-        #output = model(batch_x) #20220120
         output = model(batch_x, adj) #20220121
         loss= F.mse_loss(output.squeeze(), batch_y) #20220121
         #loss = F.mse_loss(output.reshape(-1), batch_y) #20220120
@@ -251,10 +265,13 @@ def test(loader):
 
 
 # Wrap data into DataLoader
-#num_samples_used = 8; print('num_samples_used: ', num_samples_used) #20220122
-#dataset = torch.utils.data.TensorDataset(node_feats[:num_samples_used,:,:],graph_labels[:num_samples_used]) #20220122
-dataset = torch.utils.data.TensorDataset(node_feats,graph_labels)
-train_loader, val_loader, test_loader = data_loader(dataset,batch_size=20) #batch_size=20
+if(args.quicktest):
+    num_samples_used = 8; print('num_samples_used: ', num_samples_used) #20220122
+    dataset = torch.utils.data.TensorDataset(node_feats[:num_samples_used,:,:],graph_labels[:num_samples_used]) #20220122
+    train_loader, val_loader, test_loader = data_loader(dataset,batch_size=2)
+else:
+    dataset = torch.utils.data.TensorDataset(node_feats,graph_labels)
+    train_loader, val_loader, test_loader = data_loader(dataset,batch_size=20) 
 
 # Train model
 t_total = time.time()

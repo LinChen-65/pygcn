@@ -126,10 +126,11 @@ def load_adj(msa_name,mob_data_root,output_root): #20220117, 拆分代码
     return adj,num_cbgs
     
 
-def load_pretrained_embed(): #20220117, 拆分代码
+def load_pretrained_embed(pretrain_embed_path): #20220117, 拆分代码
     #pretrained_embed = np.load('/data/chenlin/code-dynalearn/scripts/figure-6/gt-generator/covid/outputs/node_embeddings_b1.0.npy')
-    pretrained_embed = np.load('/home/chenlin/code-dynalearn/scripts/figure-6/gt-generator/covid/outputs/node_embeddings_b1.0.npy')
-    
+    #pretrained_embed = np.load('/home/chenlin/code-dynalearn/scripts/figure-6/gt-generator/covid/outputs/node_embeddings_b1.0.npy')
+    pretrained_embed = np.load(pretrain_embed_path) #20220123
+
     num_embed = pretrained_embed.shape[1]
     # normalization
     pretrained_embed = preprocessing.robust_scale(pretrained_embed)
@@ -244,7 +245,7 @@ def load_cbg_demographics(msa_name, mob_data_root, normalize=True): #20220117, �
     return cbg_sizes, cbg_elder_ratio, cbg_household_income, cbg_ew_ratio
 
 
-def load_data(vac_result_path="../data/cora/", dataset="cora", msa_name=None, mob_data_root=None, output_root=None, normalize=True, rel_result=True):
+def load_data(vac_result_path="../data/cora/", dataset="cora", msa_name=None, mob_data_root=None, output_root=None, pretrain_embed_path=None, normalize=True, rel_result=True):
     print('load_data:')
     if(rel_result):
         print('rel_result=True')
@@ -262,7 +263,7 @@ def load_data(vac_result_path="../data/cora/", dataset="cora", msa_name=None, mo
 
         # node_feats
         # pretrained_embed
-        pretrained_embed, num_embed = load_pretrained_embed() #暂时注释20220120
+        pretrained_embed, num_embed = load_pretrained_embed(pretrain_embed_path) #暂时注释20220120
         #pretrained_embed = np.zeros(num_samples) #暂时注释20220120
         #num_embed = 1 #暂时注释20220120
         # cbg population and other demographic features

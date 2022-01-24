@@ -20,6 +20,7 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 import random
+from torch.utils.data import DataLoader, random_split
 
 import time
 import pdb
@@ -57,8 +58,11 @@ parser.add_argument('--mob_data_root', default = '/data/chenlin/COVID-19/Data',
 #20220118
 parser.add_argument('--normalize', default = True,
                     help='Whether normalize node features or not.')
-parser.add_argument('--rel_result', default = False,
+parser.add_argument('--rel_result', default = False, action='store_true',
                     help='Whether retrieve results relative to no_vac.')
+#20220123
+parser.add_argument('--prefix', default= '/home', 
+                    help='Prefix of data root. /home for rl4, /data for dl3.')
 
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -76,14 +80,16 @@ print('args.rel_result: ', args.rel_result)
 vac_result_path = os.path.join(args.gt_root, args.msa_name, 'vac_results_SanFrancisco_0.02_70_randomseed42_40seeds_1000samples_proportional.csv') #20220120
     
 output_root = os.path.join(args.gt_root, args.msa_name)
+pretrain_embed_path = os.path.join(args.prefix,'chenlin/code-dynalearn/scripts/figure-6/gt-generator/covid/outputs/node_embeddings_b1.0.npy' )
+
 adj, node_feats, graph_labels, idx_train, idx_val, idx_test = load_data(vac_result_path=vac_result_path, #20220113
                                                                 dataset=f'safegraph-',
                                                                 msa_name=args.msa_name,
                                                                 mob_data_root=args.mob_data_root,
                                                                 output_root=output_root,
+                                                                pretrain_embed_path=pretrain_embed_path,
                                                                 normalize=args.normalize,
                                                                 rel_result=args.rel_result,
-                                                                #rel_result=False,
                                                                 ) 
 
 graph_labels = np.array(graph_labels)
@@ -136,7 +142,6 @@ bet_centrality = preprocessing.scale(bet_centrality) #robust_scale
 mob_level = np.sum(adj, axis=1)
 mob_max = np.max(mob_level)
 # Normalization
-#mob_level /= mob_max
 mob_level = preprocessing.scale(mob_level) #20220120 #robust_scale
 
 
@@ -172,10 +177,6 @@ optimizer = optim.Adam(model.parameters(),
 
 random.seed(42)
 
-# small dataset, check network #20220119
-idx_train = idx_train#[:20]#[:100]
-idx_val = idx_val#[:2]#[:5]
-idx_test = idx_test#[:2]#[:5]
 
 if args.cuda:
     model.cuda()
@@ -189,11 +190,9 @@ if args.cuda:
     #graph_labels = graph_labels[:,1].cuda() #20220114 #case_std
 
 
-from torch.utils.data import DataLoader, random_split
 
 def data_loader(dataset, batch_size):
     train_dataset, val_dataset, test_dataset = random_split(dataset, [int(0.8*num_samples), int(0.1*num_samples), int(0.1*num_samples)])
-    pdb.set_trace()
     train_loader = DataLoader(
         train_dataset, #train_dataset.dataset,
         batch_size=batch_size,
@@ -204,20 +203,15 @@ def data_loader(dataset, batch_size):
         shuffle=True)
     test_loader = DataLoader(
         test_dataset,#test_dataset.dataset,
-        batch_size=1,#batch_size,
-        shuffle=True)
+        batch_size=batch_size, #1,
+        shuffle=False)
     return train_loader, val_loader, test_loader 
-
-dataset = torch.utils.data.TensorDataset(node_feats,graph_labels)
-train_loader, val_loader, test_loader = data_loader(dataset,batch_size=20)
- 
 
 
 def train(epoch,min_valid_loss):
     train_loss = 0.0
     model.train()
     for (batch_x, batch_y) in train_loader:
-        #pdb.set_trace()
         optimizer.zero_grad()
         output = model(batch_x)
         loss = F.mse_loss(output.squeeze(), batch_y)
@@ -225,35 +219,36 @@ def train(epoch,min_valid_loss):
         optimizer.step()
         train_loss += loss.item()
 
-        if not args.fastmode:
-            # Evaluate validation set performance separately,
-            # deactivates dropout during validation run.
-            valid_loss = 0.0
-            model.eval()
-            for (batch_x, batch_y) in val_loader:
-                output = model(batch_x)
-                loss= F.mse_loss(output.squeeze(), batch_y)
-                #valid_loss = loss.item() * batch_x.size(0)
-                valid_loss += loss.item()
+    if not args.fastmode:
+        # Evaluate validation set performance separately,
+        # deactivates dropout during validation run.
+        valid_loss = 0.0
+        model.eval()
+        for (batch_x, batch_y) in val_loader:
+            output = model(batch_x)
+            loss= F.mse_loss(output.squeeze(), batch_y)
+            valid_loss += loss.item()
 
-            print(f'Epoch {epoch+1} \t\t Training Loss: {train_loss / len(train_loader)} \t\t Validation Loss: {valid_loss / len(val_loader)}')
-            if min_valid_loss > valid_loss:
-                print(f'Validation Loss Decreased({min_valid_loss:.6f}--->{valid_loss:.6f}) \t Saving The Model')
-                min_valid_loss = valid_loss
+        print(f'Epoch {epoch+1} \t\t Training Loss: {train_loss / len(train_loader)} \t\t Validation Loss: {valid_loss / len(val_loader)}')
+        if min_valid_loss > valid_loss:
+            print(f'Validation Loss Decreased({min_valid_loss:.6f}--->{valid_loss:.6f}) \t Saving The Model')
+            min_valid_loss = valid_loss
     return min_valid_loss     
         
-def test():
+def test(loader):
     model.eval()
     test_loss = 0.0
     output_test_list = []
     truth_test_list = []
-    for (batch_x, batch_y) in test_loader:
+    for (batch_x, batch_y) in loader:
         output = model(batch_x)
-        #loss= F.mse_loss(output.squeeze(), batch_y)
-        loss = F.mse_loss(output.reshape(-1), batch_y)
+        loss= F.mse_loss(output.squeeze(), batch_y)
+        #loss = F.mse_loss(output.reshape(-1), batch_y)
         test_loss += loss.item()
-        output_test_list.append(output.item())
-        truth_test_list.append(batch_y.item())
+        output_test_list = output_test_list + output.squeeze().tolist()
+        truth_test_list = truth_test_list + batch_y.squeeze().tolist()
+        #output_test_list.append(output.item())
+        #truth_test_list.append(batch_y.item())
 
 
     print(f'test loss: {test_loss / len(test_loader)}')
@@ -261,87 +256,15 @@ def test():
     print('truth_test_list: ', truth_test_list)
     pdb.set_trace()
 
-'''
-def train(epoch):
-    t = time.time()
-    model.train()
 
-    output_train_list = []
-    truth_train_list = []
-    loss_train_list = []
-    accumulation_step = 20 #20 #20220115 #相当于batch_size
-    for i in range(accumulation_step):
-        sample_idx_train = idx_train[random.sample(range(len(idx_train)), 1)] #20220114
-        output = model(node_feats[sample_idx_train].squeeze()) #20220114
-        loss_train = F.mse_loss(output.squeeze(), graph_labels[sample_idx_train.squeeze()]) #20220114
-        loss_train.backward() #20220115
+# Wrap data into DataLoader
+dataset = torch.utils.data.TensorDataset(node_feats,graph_labels)
+train_loader, val_loader, test_loader = data_loader(dataset,batch_size=20)
 
-        output_train_list.append(output.item())
-        truth_train_list.append(graph_labels[sample_idx_train.squeeze()].item())
-        loss_train_list.append(loss_train.item())
-
-    optimizer.step()
-    optimizer.zero_grad()
-
-    if not args.fastmode:
-        # Evaluate validation set performance separately,
-        # deactivates dropout during validation run.
-        model.eval()
-
-        output_val_list = []
-        truth_val_list = []
-        loss_val_list = []
-        for i in range(len(idx_val)):
-            sample_idx_val = idx_val[i]
-            output = model(node_feats[sample_idx_val].squeeze()) 
-
-            loss_val = F.mse_loss(output.squeeze(), graph_labels[sample_idx_val]) #20220114
-            
-            output_val_list.append(output.item())
-            truth_val_list.append(graph_labels[sample_idx_val.squeeze()].item())
-            loss_val_list.append(loss_val.item())
-
-        loss_val = np.mean(np.array(loss_val_list))
-        
-        if(epoch%10==0):
-            print('Epoch: {:04d}'.format(epoch+1),
-                #'loss_train: {:.4f}'.format(loss_train.item()),
-                'loss_train: {:.4f}'.format(np.mean(np.array(loss_train_list))),
-                'loss_val: {:.4f}'.format(loss_val.item()),
-                'time: {:.4f}s'.format(time.time() - t),
-                )
-
-    return False
-
-def test():
-    model.eval()
-    
-    #sample_idx_test = idx_test[random.sample(range(len(idx_test)), 1)] #20220114
-    output_test_list = []
-    truth_test_list = []
-    loss_test_list = []
-    for i in range(len(idx_test)):
-        sample_idx_test = idx_test[i]
-        output = model(node_feats[sample_idx_test].squeeze()) 
-        loss_test = F.mse_loss(output.squeeze(), graph_labels[sample_idx_test.squeeze()]) #20220114
-
-        output_test_list.append(output.item())
-        truth_test_list.append(graph_labels[sample_idx_test.squeeze()].item())
-        loss_test_list.append(loss_test.item())
-    
-    loss_test = np.mean(np.array(loss_test_list))
-    print("Test set results:",
-          "loss= {:.4f}".format(loss_test.item()),
-          )
-    print('output_test_list: ', output_test_list)
-    print('truth_test_list: ', truth_test_list)
-    pdb.set_trace()
-'''
 # Train model
 t_total = time.time()
 min_valid_loss = np.inf
 for epoch in range(args.epochs):
-    #train(epoch) #original
     min_valid_loss = train(epoch,min_valid_loss)
     #early_stop,min_valid_loss = train(epoch,min_valid_loss)
     #if(early_stop):
@@ -351,7 +274,7 @@ print("Total time elapsed: {:.4f}s".format(time.time() - t_total))
 pdb.set_trace()
 
 # Testing
-test()
+test(test_loader)
 
 
 
