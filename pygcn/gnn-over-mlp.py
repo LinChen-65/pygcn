@@ -64,6 +64,9 @@ parser.add_argument('--quicktest', default= False, action='store_true',
                     help='Whether use a small dataset to quickly test the model.')
 parser.add_argument('--prefix', default= '/home', 
                     help='Prefix of data root. /home for rl4, /data for dl3.')
+#20220126
+parser.add_argument('--model_save_folder', default= 'chenlin/pygcn/pygcn/trained_model', 
+                    help='Folder to save trained model.')
 
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -73,6 +76,9 @@ if args.cuda:
     torch.cuda.manual_seed(args.seed)
 print('args.rel_result: ', args.rel_result)
 print('args.quicktest: ', args.quicktest)
+
+model_save_path = os.path.join(args.prefix, args.model_save_folder, 'total_cases_20220126.pt')
+print('model_save_path: ', model_save_path)
 
 
 # Load data
@@ -135,14 +141,13 @@ bet_centrality = torch.Tensor(np.tile(bet_centrality,(num_samples,1))).unsqueeze
 mob_level = torch.Tensor(np.tile(mob_level,(num_samples,1))).unsqueeze(axis=2) #20220120
 vac_flag = node_feats[:,:,-1].unsqueeze(axis=2)
 
-# 无pretrain_embed，不拼接原始特征，仅把GCN output embedding和vac flag输入MLP layers #目前采用这个
+# 无pretrain_embed，不拼接原始特征，仅把GCN output embedding和vac flag输入MLP layers 
 #node_feats = np.concatenate((node_feats[:,:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag, vac_flag), axis=2) #20220121
 # 无pretrain_embed，把原始特征拼接在GCN output embedding上再输入MLP layers
 #node_feats = np.concatenate((node_feats[:,:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag, 
 #                             node_feats[:,:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag), axis=2) #20220123
-# 有pretrain_embed，不拼接原始特征
+# 有pretrain_embed，不拼接原始特征 #目前采用这个
 node_feats = np.concatenate((node_feats, deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag, vac_flag), axis=2) #20220123
-
 print('node_feats.shape: ', node_feats.shape) #(990, 2943, 9) 最后一维1=vac，0=no_vac #(990, 2943, 16) 最后一维1=vac，0=no_vac
 
 node_feats = torch.Tensor(node_feats)
@@ -293,6 +298,13 @@ print("Optimization Finished!")
 print("Total time elapsed: {:.4f}s".format(time.time() - t_total))
 print('train_loss_record: ',train_loss_record)
 print('val_loss_record: ',val_loss_record)
+
+pdb.set_trace()
+test(test_loader)
+
+torch.save(model, model_save_path)
+# Test reloading model
+model_reloaded = torch.load(model_save_path)
 pdb.set_trace()
 
 # Testing

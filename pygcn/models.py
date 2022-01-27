@@ -11,6 +11,8 @@ import torch
 
 import pdb
 
+NN = 70 # Num of CBGs to be selected
+
 class GCN(nn.Module):
     def __init__(self, nfeat, nhid, nclass, dropout):
         super(GCN, self).__init__()
@@ -135,7 +137,6 @@ class PoolLayer(nn.Module): #20220120
 
 
 
-
 class GCN_OVER_MLP(nn.Module): #20220121
     def __init__(self, config):
         nn.Module.__init__(self)
@@ -145,6 +146,7 @@ class GCN_OVER_MLP(nn.Module): #20220121
         self.dim_touched = config.dim_touched
 
     def forward(self, x, adj):
+        #pdb.set_trace()
         #x = self.GCNLayer.forward(x, adj) 
         for i in range(x.shape[0]): #暂时无法批处理，只能土法循环  #20220121
             #this_output = self.GCNLayer.forward(x[i,:,:-1], adj) #最后一维标记是否免疫，不要动
@@ -155,12 +157,30 @@ class GCN_OVER_MLP(nn.Module): #20220121
                 all_gcn_output = torch.stack((all_gcn_output,this_output),dim=0)
             else:
                 all_gcn_output = torch.cat((all_gcn_output,this_output.unsqueeze(dim=0)), dim=0)
-        
+        #pdb.set_trace()
         all_gcn_output = torch.cat((all_gcn_output, x[:,:,self.dim_touched:]), dim=2) #20220123
         #pdb.set_trace()
         x = self.PoolLayer.forward(all_gcn_output)
         x = self.MLPLayers.forward(x)
         return x
+
+
+class Generator(nn.Module): #20220126
+    def __init__(self, config):
+        nn.Module.__init__(self)
+        self.GCNLayer = GCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout)
+        self.MLPLayers = MLPLayers(config.linear_nin, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_activation, config.linear_bias)
+        self.dim_touched = config.dim_touched
+
+    def forward(self, x, adj):
+        #pdb.set_trace()
+        all_gcn_output = self.GCNLayer.forward(x[:,:self.dim_touched], adj) 
+        all_gcn_output = torch.cat((all_gcn_output, x[:,self.dim_touched:]), dim=1) #20220123
+        x = self.MLPLayers.forward(all_gcn_output)
+        #x = x.squeeze()
+        #predicted_sorted_indexes = torch.argsort(x)  # 返回从大到小的索引
+        sorted_x = torch.topk(x.squeeze(),NN)
+        return sorted_x #x
 
 
 def get_model(config, model_name='GCN'):
@@ -175,7 +195,7 @@ def get_model(config, model_name='GCN'):
             PoolLayer(),
             MLPLayers(config.linear_nin, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_activation, config.linear_bias)
         )
-    elif(model_name=='GNN_OVER_MLP'):
+    elif(model_name=='GNN_OVER_MLP'): #20220121
         layers = GCN_OVER_MLP(config)
         '''
         layers = Sequential(
@@ -184,4 +204,6 @@ def get_model(config, model_name='GCN'):
             MLPLayers(config.linear_nin, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_activation, config.linear_bias)
         )
         '''
+    elif(model_name=='Generator'): #20220126
+        layers = Generator(config)
     return layers

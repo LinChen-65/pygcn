@@ -245,44 +245,57 @@ def load_cbg_demographics(msa_name, mob_data_root, normalize=True): #20220117, �
     return cbg_sizes, cbg_elder_ratio, cbg_household_income, cbg_ew_ratio
 
 
-def load_data(vac_result_path="../data/cora/", dataset="cora", msa_name=None, mob_data_root=None, output_root=None, pretrain_embed_path=None, normalize=True, rel_result=True):
-    print('load_data:')
-    if(rel_result):
-        print('rel_result=True')
-    else:
-        print('rel_result=False')
+def load_data(vac_result_path="../data/cora/", dataset="cora", msa_name=None, mob_data_root=None, output_root=None, pretrain_embed_path=None, normalize=True, rel_result=True, with_vac_flag=True):
+    if(rel_result): print('rel_result=True')
+    else: print('rel_result=False')
     if('safegraph' in dataset):
         """Load safegraph dataset"""
         print('Loading {} dataset...'.format(dataset))
 
-        # vaccination results
-        graph_labels, idx_train, idx_val, idx_test, num_samples, vac_tags = load_vac_results(vac_result_path,rel_result)
-        
-        # adj
-        adj, num_cbgs = load_adj(msa_name,mob_data_root,output_root)
+        if(with_vac_flag): # For training predictor
+            # vaccination results
+            graph_labels, idx_train, idx_val, idx_test, num_samples, vac_tags = load_vac_results(vac_result_path,rel_result)
+            
+            # adj
+            adj, num_cbgs = load_adj(msa_name,mob_data_root,output_root)
 
-        # node_feats
-        # pretrained_embed
-        pretrained_embed, num_embed = load_pretrained_embed(pretrain_embed_path) #暂时注释20220120
-        #pretrained_embed = np.zeros(num_samples) #暂时注释20220120
-        #num_embed = 1 #暂时注释20220120
-        # cbg population and other demographic features
-        cbg_sizes, cbg_elder_ratio, cbg_household_income, cbg_ew_ratio = load_cbg_demographics(msa_name, mob_data_root, normalize)
-        node_feats = np.zeros(((num_samples, num_cbgs, 5+num_embed)))
-        node_feats[:,:,0] = cbg_sizes.reshape(1,-1)
-        node_feats[:,:,1] = cbg_elder_ratio.reshape(1,-1)
-        node_feats[:,:,2] = cbg_household_income.reshape(1,-1)
-        node_feats[:,:,3] = cbg_ew_ratio.reshape(1,-1)
-        node_feats[:,:,4:4+num_embed] = pretrained_embed
-        # vac tags
-        for i in range(num_samples):
-            #node_feats[i, np.array(df['Vaccinated_Idxs'][i+1]), 1] = 1
-            node_feats[i, vac_tags[i], -1] = 1   
-        
-        node_feats = torch.FloatTensor(node_feats)
+            # node_feats
+            # pretrained_embed
+            pretrained_embed, num_embed = load_pretrained_embed(pretrain_embed_path) 
+            # cbg population and other demographic features
+            cbg_sizes, cbg_elder_ratio, cbg_household_income, cbg_ew_ratio = load_cbg_demographics(msa_name, mob_data_root, normalize)
+            node_feats = np.zeros(((num_samples, num_cbgs, 5+num_embed)))
+            node_feats[:,:,0] = cbg_sizes.reshape(1,-1)
+            node_feats[:,:,1] = cbg_elder_ratio.reshape(1,-1)
+            node_feats[:,:,2] = cbg_household_income.reshape(1,-1)
+            node_feats[:,:,3] = cbg_ew_ratio.reshape(1,-1)
+            node_feats[:,:,4:4+num_embed] = pretrained_embed
+            # vac tags
+            for i in range(num_samples):
+                node_feats[i, vac_tags[i], -1] = 1   
+            
+            node_feats = torch.FloatTensor(node_feats)
+            return adj, node_feats, graph_labels, idx_train, idx_val, idx_test
 
-        #pdb.set_trace()
-        return adj, node_feats, graph_labels, idx_train, idx_val, idx_test
+        else: # For training policy generator
+            # adj
+            adj, num_cbgs = load_adj(msa_name,mob_data_root,output_root)
+
+            # node_feats
+            # pretrained_embed
+            pretrained_embed, num_embed = load_pretrained_embed(pretrain_embed_path) 
+            # cbg population and other demographic features
+            cbg_sizes, cbg_elder_ratio, cbg_household_income, cbg_ew_ratio = load_cbg_demographics(msa_name, mob_data_root, normalize)
+            
+            node_feats = np.zeros((num_cbgs, 4+num_embed))
+            node_feats[:,0] = cbg_sizes.reshape(1,-1)
+            node_feats[:,1] = cbg_elder_ratio.reshape(1,-1)
+            node_feats[:,2] = cbg_household_income.reshape(1,-1)
+            node_feats[:,3] = cbg_ew_ratio.reshape(1,-1)
+            node_feats[:,4:4+num_embed] = pretrained_embed
+
+            node_feats = torch.FloatTensor(node_feats)
+            return adj, node_feats
 
     elif(dataset=='cora'):
         """Load citation network dataset (cora only for now)"""
