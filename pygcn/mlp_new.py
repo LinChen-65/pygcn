@@ -3,7 +3,7 @@
 import setproctitle
 setproctitle.setproctitle("gnn-simu-vac@chenlin")
 
-from utils import load_data, visualize
+from utils import *
 import argparse
 import os
 import sys
@@ -15,7 +15,6 @@ import statsmodels.api as sm
 from statsmodels.stats.outliers_influence import summary_table
 from sklearn import preprocessing
 import matplotlib.pyplot as plt
-import seaborn as sns
 import time
 import pdb
 
@@ -53,6 +52,8 @@ parser.add_argument('--normalize', default = True,
 parser.add_argument('--rel_result', default = False, action='store_true',
                     help='Whether retrieve results relative to no_vac.')
 #20220123
+parser.add_argument('--quicktest', default= False, action='store_true',
+                    help='Whether use a small dataset to quickly test the model.')
 parser.add_argument('--prefix', default= '/home', 
                     help='Prefix of data root. /home for rl4, /data for dl3.')
 
@@ -91,17 +92,13 @@ else:
     graph_name = 'total_cases_hist_notgrouped.png'
 visualization_save_path = os.path.join(args.gt_root, args.msa_name,graph_name)
 visualize(np.array(graph_labels[:,0]), bins=20, save_path=visualization_save_path)
-pdb.set_trace()
 '''
+
 # Extract useful node features
 cbg_sizes = np.array(node_feats[0,:,0])
 cbg_elder_ratio = np.array(node_feats[0,:,1])
 cbg_household_income = np.array(node_feats[0,:,2])
 cbg_ew_ratio = np.array(node_feats[0,:,3])
-
-# Normalization
-#for i in range(graph_labels.shape[1]):
-#    graph_labels[:,i] = preprocessing.robust_scale(graph_labels[:,i])
 
 
 # Calculate node centrality
@@ -109,7 +106,6 @@ start = time.time(); print('Start graph construction..')
 adj = np.array(adj)
 G_nx = nx.from_numpy_array(adj)
 print('Finish graph construction. Time used: ',time.time()-start)
-
 # Convert from networkx to igraph
 #d = nx.to_pandas_edgelist(G_nx).values
 #G_ig = ig.Graph(d)
@@ -118,16 +114,9 @@ start = time.time(); print('Start centrality computation..')
 deg_centrality = np.array(G_ig.degree())
 clo_centrality = np.array(G_ig.closeness()) #normalized=True
 bet_centrality = np.array(G_ig.betweenness())
-# Normalization
-#deg_centrality = preprocessing.robust_scale(deg_centrality)
-#clo_centrality = preprocessing.robust_scale(clo_centrality)
-#bet_centrality = preprocessing.robust_scale(bet_centrality)
 
 # Calculate average mobility level
 mob_level = np.sum(adj, axis=1)
-mob_max = np.max(mob_level)
-# Normalization
-#mob_level /= mob_max
 
 
 # Concatenate CBG features
@@ -141,7 +130,7 @@ result_df = pd.DataFrame(columns=['Avg_Sizes','Avg_Elder_Ratio','Avg_Household_I
                                   'Std_Deg_Centrality','Std_Bet_Centrality','Std_Clo_Centrality',
                                   'Std_Mob_Level',
                                   'Total_Cases','Case_Rates_STD','Total_Deaths','Death_Rates_STD'])
-#pdb.set_trace()
+
 for i in range(num_samples):
     target_nodes = np.nonzero(np.array(node_feats[i,:,-1]))[0]
     result_df.loc[i] = [np.mean(cbg_sizes[target_nodes]),np.mean(cbg_elder_ratio[target_nodes]),np.mean(cbg_household_income[target_nodes]),np.mean(cbg_ew_ratio[target_nodes]),
@@ -159,11 +148,13 @@ data = result_df
 ## 准备自变量和因变量
 dataX = data.iloc[:,:16]
 dataY = data.iloc[:,16]
-## 数据标准化
-scale = StandardScaler(with_mean=True,with_std=True)
-dataXS = scale.fit_transform(dataX)
 ##  数据切分
-train_x,test_x,train_y,test_y = train_test_split(dataXS,dataY.values,test_size = 0.1,random_state = 2)#test_size = 0.25
+train_x,test_x,train_y,test_y = train_test_split(dataX,dataY.values,test_size = 0.1,random_state = 42)
+## 数据标准化
+scaler = StandardScaler()
+scaler.fit(train_x)
+train_x = scaler.transform(train_x) #20220127
+test_x = scaler.transform(test_x) #20220127
 print(train_x.shape)
 print(train_y.shape)
 
@@ -215,30 +206,3 @@ print("mean squared error:", metrics.mean_squared_error(test_y,pre_y))
 print("在训练集上的R^2:",mlpr.score(train_x,train_y))
 print("在测试集上的R^2:",mlpr.score(test_x,test_y))
 pdb.set_trace()
-
-
-
-'''
-#自动调参
-from sklearn.model_selection import GridSearchCV
-#需要求的参数的范围(列表的形式)
-param_grid = {"activation":["relu","tanh"],
-              "alpha":[0.0001,0.0002,0.0003,0.0004,0.0005,0.0006],
-              "n_iter_no_change":[10,20,30,40,50],
-              "tol":[1e-3,1e-4,1e-5]
-              }
-#estimator模型 （将所求参数之外的确定的参数给出 ）
-estimator = MLPRegressor(hidden_layer_sizes=(100,100),
-                    solver='adam', 
-                    max_iter=10000, 
-                    random_state=123,
-                    early_stopping=True, ## 是否提前停止训练
-                    validation_fraction=0.1, ## 20%作为验证集
-                    )
-grid_search = GridSearchCV(estimator,param_grid,cv = 5)
-grid_search.fit(train_x,train_y)
-print("Best set score:{:.2f}".format(grid_search.best_score_))
-print("Best parameters:{}".format(grid_search.best_params_))
-print("Test set score:{:.2f}".format(grid_search.score(test_x,test_y)))
-pdb.set_trace()
-'''

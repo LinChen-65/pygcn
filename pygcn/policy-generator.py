@@ -45,7 +45,7 @@ parser.add_argument('--lr', type=float, default=0.01,
                     help='Initial learning rate.')
 parser.add_argument('--weight_decay', type=float, default=5e-4,
                     help='Weight decay (L2 loss on parameters).')
-parser.add_argument('--hidden', type=int, default=30, #100,#400, #default=16(original)
+parser.add_argument('--hidden', type=int, default=32, #100,#400, #default=16(original)
                     help='Number of hidden units.')
 parser.add_argument('--dropout', type=float, default=0.5,
                     help='Dropout rate (1 - keep probability).')
@@ -64,15 +64,25 @@ parser.add_argument('--rel_result', default = False, action='store_true',
 #20220123
 parser.add_argument('--prefix', default= '/home', 
                     help='Prefix of data root. /home for rl4, /data for dl3.')
+#20220127
+parser.add_argument('--trained_evaluator_folder', default= 'chenlin/pygcn/pygcn/trained_model', 
+                    help='Folder to reload trained evaluator model.')
 
 args = parser.parse_args()
+# Check important parameters
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 if args.cuda:
     torch.cuda.manual_seed(args.seed)
 print('args.rel_result: ', args.rel_result)
+evaluator_path = os.path.join(args.prefix, args.trained_evaluator_folder, 'total_cases_20220126.pt')
+print('evaluator_path: ', evaluator_path)
 
+# Load trained PolicyEvaluator #20220127
+evaluator = torch.load(evaluator_path)
+print('evaluator: ', evaluator)
+evaluator.eval()
 
 # Load adj and CBG features
 output_root = os.path.join(args.gt_root, args.msa_name)
@@ -157,25 +167,34 @@ if args.cuda:
     #graph_labels = graph_labels[:,0].cuda() #20220114 #total_cases
     #graph_labels = graph_labels[:,1].cuda() #20220114 #case_std
 
-output = model(gen_node_feats, adj)
-# Obtain indices of top-NN CBGs to be vaccinated
-policy = output.indices
-# Construct vac_flags
-vac_flag = np.zeros(adj.shape[0]) # Num of cbgs
-for i in range(len(policy)):
-    vac_flag[policy[i]] = 1
-vac_flag = vac_flag.reshape(-1,1)
-#vac_flag = torch.Tensor(vac_flag)
+for epoch in range(args.epochs):
+    output = model(gen_node_feats, adj)
+    # Obtain indices of top-NN CBGs to be vaccinated
+    policy = output.indices
+    # Construct vac_flags
+    vac_flag = np.zeros(adj.shape[0]) # Num of cbgs
+    for i in range(len(policy)):
+        vac_flag[policy[i]] = 1
+    vac_flag = vac_flag.reshape(-1,1)
+    #vac_flag = torch.Tensor(vac_flag)
 
-# Prepare inputs for PolicyEvaluator
-eval_node_feats = np.concatenate((node_feats, deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag, vac_flag), axis=1) #20220123
-print('eval_node_feats.shape: ', eval_node_feats.shape) #(990, 2943, 9) 最后一维1=vac，0=no_vac #(990, 2943, 16) 最后一维1=vac，0=no_vac
-eval_node_feats = torch.Tensor(eval_node_feats)
-if args.cuda:
-    eval_node_feats = eval_node_feats.cuda()
-# Retrieve trained PolicyEvaluator
-# Run evaluation
-# Optimize
+    # Prepare inputs for PolicyEvaluator
+    eval_node_feats = np.concatenate((node_feats, vac_flag, deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag, vac_flag), axis=1) #20220123
+    print('eval_node_feats.shape: ', eval_node_feats.shape) #(990, 2943, 9) 最后一维1=vac，0=no_vac #(990, 2943, 16) 最后一维1=vac，0=no_vac
+    eval_node_feats = torch.Tensor(eval_node_feats)
+    if args.cuda:
+        eval_node_feats = eval_node_feats.cuda()
+
+    eval_node_feats = eval_node_feats.unsqueeze(axis=0)
+
+    # Run evaluation
+    outcome = evaluator(eval_node_feats, adj); print('outcome: ', outcome)
+
+    # Backprop
+    loss = -outcome
+    loss.backward()
+    optimizer.step()
+
 
 pdb.set_trace()
 

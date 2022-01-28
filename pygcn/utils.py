@@ -12,6 +12,7 @@ import pdb
 import time
 from sklearn import preprocessing
 import matplotlib.pyplot as plt
+from torch.utils.data import DataLoader
 
 sys.path.append(os.path.join(os.getcwd(), '../gt-generator'))
 import constants
@@ -133,7 +134,7 @@ def load_pretrained_embed(pretrain_embed_path): #20220117, 拆分代码
 
     num_embed = pretrained_embed.shape[1]
     # normalization
-    pretrained_embed = preprocessing.robust_scale(pretrained_embed)
+    #pretrained_embed = preprocessing.robust_scale(pretrained_embed) #20220127注释
     return pretrained_embed, num_embed
 
 
@@ -168,12 +169,12 @@ def load_cbg_age(mob_data_root, cbg_ids_msa, normalize=True): #20220117, 拆分�
     # CBG sizes (populations)
     cbg_sizes = cbg_age_msa['Sum'].values
     cbg_sizes = np.array(cbg_sizes,dtype='int32') #;print('Total population: ',np.sum(cbg_sizes))
-    
+    cbg_sizes_original = cbg_sizes.copy()
+
     # normalization
-    if(normalize):
-        cbg_sizes_original = cbg_sizes.copy()
-        cbg_sizes = preprocessing.robust_scale(cbg_sizes.reshape(-1,1)) 
-        cbg_elder_ratio = preprocessing.robust_scale(cbg_elder_ratio.reshape(-1,1))
+    #if(normalize): #20220127注释
+    #    cbg_sizes = preprocessing.robust_scale(cbg_sizes.reshape(-1,1)) 
+    #    cbg_elder_ratio = preprocessing.robust_scale(cbg_elder_ratio.reshape(-1,1))
 
     return cbg_sizes, cbg_sizes_original, cbg_elder_ratio
 
@@ -195,8 +196,8 @@ def load_cbg_income(mob_data_root, cbg_ids_msa, normalize=True): #20220117, 拆�
     cbg_household_income = np.array(cbg_income_msa['Mean_Household_Income'])
     
     # Normalization
-    if(normalize):
-        cbg_household_income = preprocessing.robust_scale(cbg_household_income.reshape(-1,1))
+    #if(normalize): #20220127注释
+    #    cbg_household_income = preprocessing.robust_scale(cbg_household_income.reshape(-1,1))
     
     return cbg_household_income
 
@@ -222,8 +223,8 @@ def load_cbg_occupation(mob_data_root, cbg_ids_msa, cbg_sizes, normalize=True): 
     cbg_ew_ratio = np.array(cbg_occupation_msa['Essential_Worker_Ratio'])
 
     # Normalization
-    if(normalize):
-        cbg_ew_ratio = preprocessing.robust_scale(cbg_ew_ratio.reshape(-1,1))
+    #if(normalize):#20220127注释
+    #    cbg_ew_ratio = preprocessing.robust_scale(cbg_ew_ratio.reshape(-1,1))
     
     return cbg_ew_ratio
 
@@ -241,6 +242,12 @@ def load_cbg_demographics(msa_name, mob_data_root, normalize=True): #20220117, �
     cbg_household_income = load_cbg_income(mob_data_root, cbg_ids_msa, normalize)
     # CBG essential worker ratio
     cbg_ew_ratio = load_cbg_occupation(mob_data_root, cbg_ids_msa, cbg_sizes_original, normalize)
+
+    # Reshape #20220127
+    cbg_sizes = cbg_sizes.reshape(-1,1) 
+    cbg_elder_ratio = cbg_elder_ratio.reshape(-1,1)
+    cbg_household_income = cbg_household_income.reshape(-1,1)
+    cbg_ew_ratio = cbg_ew_ratio.reshape(-1,1)
 
     return cbg_sizes, cbg_elder_ratio, cbg_household_income, cbg_ew_ratio
 
@@ -264,6 +271,21 @@ def load_data(vac_result_path="../data/cora/", dataset="cora", msa_name=None, mo
             pretrained_embed, num_embed = load_pretrained_embed(pretrain_embed_path) 
             # cbg population and other demographic features
             cbg_sizes, cbg_elder_ratio, cbg_household_income, cbg_ew_ratio = load_cbg_demographics(msa_name, mob_data_root, normalize)
+            
+            if(normalize): # Data normalization #20220127
+                # Obtain statistics on train set -> Apply to all data
+                scaler = preprocessing.StandardScaler()
+                scaler.fit(cbg_sizes[idx_train])
+                cbg_sizes = scaler.transform(cbg_sizes)
+                scaler.fit(cbg_elder_ratio[idx_train])
+                cbg_elder_ratio = scaler.transform(cbg_elder_ratio)
+                scaler.fit(cbg_household_income[idx_train])
+                cbg_household_income = scaler.transform(cbg_household_income)
+                scaler.fit(cbg_ew_ratio[idx_train])
+                cbg_ew_ratio = scaler.transform(cbg_ew_ratio)
+                scaler.fit(pretrained_embed[idx_train])
+                pretrained_embed = scaler.transform(pretrained_embed)
+            
             node_feats = np.zeros(((num_samples, num_cbgs, 5+num_embed)))
             node_feats[:,:,0] = cbg_sizes.reshape(1,-1)
             node_feats[:,:,1] = cbg_elder_ratio.reshape(1,-1)
@@ -374,3 +396,30 @@ def visualize(data, bins, save_path): #20220119
     plt.hist(data, bins=bins)
     plt.savefig(save_path)
     print('Figure saved at: ', save_path)
+
+
+def data_loader(node_feats, graph_labels, idx_train, idx_val, idx_test, batch_size, quicktest=False): #20220127
+    # Divide data into train/val/test datasets; Wrap data into DataLoader
+    if(quicktest):
+        batch_size = 2
+        idx_train = idx_train[:batch_size*4]
+        idx_val = idx_val[:batch_size]
+        idx_test = idx_test[:batch_size]
+
+    train_dataset = torch.utils.data.TensorDataset(node_feats[idx_train,:,:],graph_labels[idx_train])
+    val_dataset = torch.utils.data.TensorDataset(node_feats[idx_val,:,:],graph_labels[idx_val])
+    test_dataset = torch.utils.data.TensorDataset(node_feats[idx_test,:,:],graph_labels[idx_test])
+        
+    train_loader = DataLoader(
+        train_dataset, #train_dataset.dataset,
+        batch_size=batch_size,
+        shuffle=True)
+    val_loader = DataLoader(
+        val_dataset, #val_dataset.dataset,
+        batch_size=batch_size,
+        shuffle=True)
+    test_loader = DataLoader(
+        test_dataset,#test_dataset.dataset,
+        batch_size=batch_size,
+        shuffle=False) #shuffle=True)
+    return train_loader, val_loader, test_loader 

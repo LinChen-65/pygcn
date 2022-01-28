@@ -3,7 +3,7 @@
 import setproctitle
 setproctitle.setproctitle("gnn-simu-vac@chenlin")
 
-from utils import load_data, visualize
+from utils import *
 import argparse
 import os
 import sys
@@ -12,7 +12,6 @@ import igraph as ig
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
-from statsmodels.stats.outliers_influence import summary_table
 from sklearn import preprocessing
 from models import get_model
 from config import *
@@ -20,7 +19,7 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 import random
-from torch.utils.data import DataLoader, random_split
+#from torch.utils.data import DataLoader, random_split
 
 import time
 import pdb
@@ -44,7 +43,7 @@ parser.add_argument('--lr', type=float, default=0.01,
                     help='Initial learning rate.')
 parser.add_argument('--weight_decay', type=float, default=5e-4,
                     help='Weight decay (L2 loss on parameters).')
-parser.add_argument('--hidden', type=int, default=30, #100,#400, #default=16(original)
+parser.add_argument('--hidden', type=int, default=32, #100,#400, #default=16(original)
                     help='Number of hidden units.')
 parser.add_argument('--dropout', type=float, default=0.5,
                     help='Dropout rate (1 - keep probability).')
@@ -61,6 +60,8 @@ parser.add_argument('--normalize', default = True,
 parser.add_argument('--rel_result', default = False, action='store_true',
                     help='Whether retrieve results relative to no_vac.')
 #20220123
+parser.add_argument('--quicktest', default= False, action='store_true',
+                    help='Whether use a small dataset to quickly test the model.')
 parser.add_argument('--prefix', default= '/home', 
                     help='Prefix of data root. /home for rl4, /data for dl3.')
 
@@ -109,17 +110,12 @@ visualization_save_path = os.path.join(args.gt_root, args.msa_name,graph_name)
 visualize(np.array(graph_labels[:,0]), bins=20, save_path=visualization_save_path)
 '''
 
-# Normalization
-#for i in range(graph_labels.shape[1]):
-#    graph_labels[:,i] = preprocessing.robust_scale(graph_labels[:,i])
 
 # Calculate node centrality
 start = time.time(); print('Start graph construction..')
 adj = np.array(adj)
 G_nx = nx.from_numpy_array(adj)
 print('Finish graph construction. Time used: ',time.time()-start)
-
-
 # Convert from networkx to igraph
 #d = nx.to_pandas_edgelist(G_nx).values
 #G_ig = ig.Graph(d)
@@ -128,10 +124,6 @@ start = time.time(); print('Start centrality computation..')
 deg_centrality = G_ig.degree()
 clo_centrality = G_ig.closeness() #normalized=True
 bet_centrality = G_ig.betweenness()
-# Normalization
-deg_centrality = preprocessing.scale(deg_centrality) #robust_scale
-clo_centrality = preprocessing.scale(clo_centrality) #robust_scale
-bet_centrality = preprocessing.scale(bet_centrality) #robust_scale
 #start = time.time(); print('Start centrality computation..')
 #deg_centrality = nx.degree_centrality(G_nx);print('Time for deg: ', time.time()-start); start=time.time()
 #clo_centrality = nx.closeness_centrality(G_nx);print('Time for clo: ', time.time()-start); start=time.time()
@@ -141,8 +133,6 @@ bet_centrality = preprocessing.scale(bet_centrality) #robust_scale
 # Calculate average mobility level
 mob_level = np.sum(adj, axis=1)
 mob_max = np.max(mob_level)
-# Normalization
-mob_level = preprocessing.scale(mob_level) #20220120 #robust_scale
 
 
 num_samples = node_feats.shape[0]
@@ -158,6 +148,15 @@ print('node_feats.shape: ', node_feats.shape) # (990, 2943, 9) 最后一维1=vac
 node_feats = torch.Tensor(node_feats)
 adj = torch.Tensor(adj)
 graph_labels = torch.Tensor(graph_labels)
+
+if args.cuda:
+    adj = adj.cuda()
+    node_feats = node_feats.cuda() #20220114
+    graph_labels = graph_labels[:,0].cuda() #20220114 #total_cases
+    #graph_labels = graph_labels[:,1].cuda() #20220114 #case_std
+
+train_loader, val_loader, test_loader = data_loader(node_feats,graph_labels,idx_train,idx_val,idx_test, batch_size=20, quicktest=args.quicktest)
+
 
 # Model and optimizer
 config = Config()
@@ -177,20 +176,19 @@ optimizer = optim.Adam(model.parameters(),
 
 random.seed(42)
 
-
 if args.cuda:
     model.cuda()
-    adj = adj.cuda()
-    idx_train = idx_train.cuda()
-    idx_val = idx_val.cuda()
-    idx_test = idx_test.cuda()
+    ##adj = adj.cuda()
+    ##idx_train = idx_train.cuda()
+    ##idx_val = idx_val.cuda()
+    ##idx_test = idx_test.cuda()
 
-    node_feats = node_feats.cuda() #20220114
-    graph_labels = graph_labels[:,0].cuda() #20220114 #total_cases
+    ##node_feats = node_feats.cuda() #20220114
+    ##graph_labels = graph_labels[:,0].cuda() #20220114 #total_cases
     #graph_labels = graph_labels[:,1].cuda() #20220114 #case_std
 
 
-
+'''
 def data_loader(dataset, batch_size):
     train_dataset, val_dataset, test_dataset = random_split(dataset, [int(0.8*num_samples), int(0.1*num_samples), int(0.1*num_samples)])
     train_loader = DataLoader(
@@ -206,7 +204,7 @@ def data_loader(dataset, batch_size):
         batch_size=batch_size, #1,
         shuffle=False)
     return train_loader, val_loader, test_loader 
-
+'''
 
 def train(epoch,min_valid_loss):
     train_loss = 0.0
@@ -235,6 +233,7 @@ def train(epoch,min_valid_loss):
             min_valid_loss = valid_loss
     return min_valid_loss     
         
+
 def test(loader):
     model.eval()
     test_loss = 0.0
@@ -247,9 +246,6 @@ def test(loader):
         test_loss += loss.item()
         output_test_list = output_test_list + output.squeeze().tolist()
         truth_test_list = truth_test_list + batch_y.squeeze().tolist()
-        #output_test_list.append(output.item())
-        #truth_test_list.append(batch_y.item())
-
 
     print(f'test loss: {test_loss / len(test_loader)}')
     print('output_test_list: ', output_test_list)
@@ -258,8 +254,10 @@ def test(loader):
 
 
 # Wrap data into DataLoader
+'''
 dataset = torch.utils.data.TensorDataset(node_feats,graph_labels)
 train_loader, val_loader, test_loader = data_loader(dataset,batch_size=20)
+'''
 
 # Train model
 t_total = time.time()
@@ -275,14 +273,4 @@ pdb.set_trace()
 
 # Testing
 test(test_loader)
-
-
-
-
-
-
-
-
-
-
 
