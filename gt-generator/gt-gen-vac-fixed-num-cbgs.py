@@ -385,8 +385,6 @@ for group_idx in range(max_group_idx):
         # Construct the vaccination vector
         target_idxs = random.sample(list(data[data['Hybrid_Group']==group_idx].index),NN) #只在组内采样
 
-
-
         vaccination_vector_randombag = functions.vaccine_distribution_fixed_nn(cbg_table=data, 
                                                                             vaccination_ratio=VACCINATION_RATIO, 
                                                                             nn=NN, 

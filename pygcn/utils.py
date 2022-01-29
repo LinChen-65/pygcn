@@ -309,6 +309,15 @@ def load_data(vac_result_path="../data/cora/", dataset="cora", msa_name=None, mo
             # cbg population and other demographic features
             cbg_sizes, cbg_elder_ratio, cbg_household_income, cbg_ew_ratio = load_cbg_demographics(msa_name, mob_data_root, normalize)
             
+            if(normalize): # Data normalization #20220128
+                # Obtain statistics on train set -> Apply to all data
+                scaler = preprocessing.StandardScaler()
+                cbg_sizes = scaler.fit_transform(cbg_sizes)
+                cbg_elder_ratio = scaler.fit_transform(cbg_elder_ratio)
+                cbg_household_income = scaler.fit_transform(cbg_household_income)
+                cbg_ew_ratio = scaler.fit_transform(cbg_ew_ratio)
+                pretrained_embed = scaler.fit_transform(pretrained_embed)
+
             node_feats = np.zeros((num_cbgs, 4+num_embed))
             node_feats[:,0] = cbg_sizes.reshape(1,-1)
             node_feats[:,1] = cbg_elder_ratio.reshape(1,-1)

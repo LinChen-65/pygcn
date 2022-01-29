@@ -212,8 +212,6 @@ config.linear_nhid1 = 100 #8#64
 config.linear_nhid2 = 100
 config.linear_nout = 1
 
-
-#model = get_model(config, 'MLP')
 model = get_model(config, 'GNN_OVER_MLP')
 print(model)
 if args.cuda:

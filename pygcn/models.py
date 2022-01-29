@@ -170,19 +170,33 @@ class Generator(nn.Module): #20220126
     def __init__(self, config):
         nn.Module.__init__(self)
         self.GCNLayer = GCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout)
-        #self.TopKPoolLayer = TopKPooling()
         self.MLPLayers = MLPLayers(config.linear_nin, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_activation, config.linear_bias)
         self.dim_touched = config.dim_touched
 
     def forward(self, x, adj):
         all_gcn_output = self.GCNLayer.forward(x[:,:self.dim_touched], adj) 
         all_gcn_output = torch.cat((all_gcn_output, x[:,self.dim_touched:]), dim=1) #20220123
-        x = self.MLPLayers.forward(all_gcn_output)
-        pdb.set_trace()
-        #x = x.squeeze()
-        #predicted_sorted_indexes = torch.argsort(x)  # 返回从大到小的索引
-        sorted_x = torch.topk(x.squeeze(),NN)
-        return sorted_x #x
+        mlp_output = self.MLPLayers.forward(all_gcn_output) 
+        sorted_indices = torch.argsort(mlp_output,dim=0,descending=True) #20220128 # 返回从大到小的索引
+        one = torch.ones_like(mlp_output)
+        zero = torch.zeros_like(mlp_output)
+        topk_mask = torch.where(mlp_output>mlp_output[sorted_indices[NN]], one, zero)
+        vac_flag = mlp_output * topk_mask
+
+        '''
+        topk_values, topk_indices = torch.topk(mlp_output.squeeze(),NN) #20220127 #返回一个元组 (values,indices) 不行，indices没有梯度
+        topk_mask = torch.zeros(mlp_output.shape).cuda()
+        topk_mask[topk_indices] = 1
+        #vac_flag = torch.ones(x.shape).cuda()
+        #vac_flag = vac_flag * topk_mask
+        vac_flag = (x[:,-1].unsqueeze(dim=1)) * topk_mask
+        '''
+        
+        #pdb.set_trace()
+
+        #return topk_values,topk_indices
+        #return x
+        return vac_flag
 
 
 def get_model(config, model_name='GCN'):
