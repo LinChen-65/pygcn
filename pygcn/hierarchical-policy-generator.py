@@ -1,9 +1,9 @@
-# python policy-generator.py --msa_name SanFrancisco  --mob_data_root '/home/chenlin/COVID-19/Data' --rel_result True --epochs 100
+# python hierarchical-policy-generator.py --msa_name SanFrancisco  --mob_data_root '/home/chenlin/COVID-19/Data' --rel_result True --epochs 100
 
+from tokenize import group
 import setproctitle
 setproctitle.setproctitle("gnn-simu-vac@chenlin")
 
-#from utils import load_data, visualize
 from utils import *
 import argparse
 import os
@@ -12,16 +12,12 @@ import networkx as nx
 import igraph as ig
 import numpy as np
 import pandas as pd
-import statsmodels.api as sm
-from statsmodels.stats.outliers_influence import summary_table
 from sklearn import preprocessing
 from models import get_model
 from config import *
 import torch
-import torch.nn.functional as F
 import torch.optim as optim
 import random
-from torch.utils.data import DataLoader, random_split
 import datetime
 
 import time
@@ -72,6 +68,14 @@ parser.add_argument('--prefix', default= '/home',
 #20220127
 parser.add_argument('--trained_evaluator_folder', default= 'chenlin/pygcn/pygcn/trained_model', 
                     help='Folder to reload trained evaluator model.')
+#20220129
+parser.add_argument('--vaccination_ratio', default=0.02, 
+                    help='Vaccination ratio (w.r.t. total population).')
+parser.add_argument('--vaccination_time', default=0, #31
+                    help='Time to distribute vaccines.')                    
+parser.add_argument('--NN', default=70, 
+                    help='Num of CBGs to receive vaccines.')
+
 
 args = parser.parse_args()
 # Check important parameters
@@ -93,30 +97,18 @@ MIN_DATETIME = datetime.datetime(2020, 3, 1, 0)
 MAX_DATETIME = datetime.datetime(2020, 5, 2, 23)
 NUM_DAYS = 63
 NUM_GROUPS = 3 #5
-# Vaccination ratio
-VACCINATION_RATIO = 0.02
-print('VACCINATION_RATIO: ', VACCINATION_RATIO)
-# Vaccination protection rate
-PROTECTION_RATE = 1
-# Policy execution ratio
-EXECUTION_RATIO = 1
-# Vaccination time
-VACCINATION_TIME = 0 #31
-print('VACCINATION_TIME: ', VACCINATION_TIME)
-MSA_NAME = args.msa_name
-MSA_NAME_FULL = constants.MSA_NAME_FULL_DICT[MSA_NAME]
-# Divide the available vaccines to how many CBGs
-NN = 70
+
+MSA_NAME_FULL = constants.MSA_NAME_FULL_DICT[args.msa_name]
 # Random Seed
 RANDOM_SEED = 42
-NUM_SEEDS = 40 #40
+NUM_SEEDS = 4 #40
 STARTING_SEED = range(NUM_SEEDS)
 # Load POI-CBG visiting matrices
-f = open(os.path.join(epic_data_root, MSA_NAME, '%s_2020-03-01_to_2020-05-02.pkl'%MSA_NAME_FULL), 'rb') 
+f = open(os.path.join(epic_data_root, args.msa_name, '%s_2020-03-01_to_2020-05-02.pkl'%MSA_NAME_FULL), 'rb') 
 poi_cbg_visits_list = pickle.load(f)
 f.close()
 # Load precomputed parameters to adjust(clip) POI dwell times
-d = pd.read_csv(os.path.join(epic_data_root,MSA_NAME, 'parameters_%s.csv' % MSA_NAME)) 
+d = pd.read_csv(os.path.join(epic_data_root,args.msa_name, 'parameters_%s.csv' % args.msa_name)) 
 # No clipping
 new_d = d
 all_hours = functions.list_hours_in_range(MIN_DATETIME, MAX_DATETIME)
@@ -127,7 +119,7 @@ del new_d
 del d
 
 # Load CBG ids for the MSA
-cbg_ids_msa = pd.read_csv(os.path.join(epic_data_root,MSA_NAME,'%s_cbg_ids.csv'%MSA_NAME_FULL)) 
+cbg_ids_msa = pd.read_csv(os.path.join(epic_data_root,args.msa_name,'%s_cbg_ids.csv'%MSA_NAME_FULL)) 
 cbg_ids_msa.rename(columns={"cbg_id":"census_block_group"}, inplace=True)
 num_cbgs = len(cbg_ids_msa)
 # Mapping from cbg_ids to columns in hourly visiting matrices
@@ -137,34 +129,24 @@ for i in cbgs_to_idxs:
     x[str(i)] = cbgs_to_idxs[i]
 idxs_msa_all = list(x.values())
 
-# Load SafeGraph data to obtain CBG sizes (i.e., populations)
-filepath = os.path.join(epic_data_root,"safegraph_open_census_data/data/cbg_b01.csv")
-cbg_agesex = pd.read_csv(filepath)
-# Extract CBGs belonging to the MSA - https://covid-mobility.stanford.edu//datasets/
-cbg_age_msa = pd.merge(cbg_ids_msa, cbg_agesex, on='census_block_group', how='left')
-del cbg_agesex
-# Rename
-cbg_age_msa.rename(columns={'B01001e1':'Sum'},inplace=True)
-# Deal with NaN values
-cbg_age_msa.fillna(0,inplace=True)
-# Deal with CBGs with 0 populations
-cbg_age_msa['Sum'] = cbg_age_msa['Sum'].apply(lambda x : x if x!=0 else 1)
-# Obtain cbg sizes (populations)
-cbg_sizes = cbg_age_msa['Sum'].values
-cbg_sizes = np.array(cbg_sizes,dtype='int32')
-del cbg_age_msa
+# Load SafeGraph data to obtain CBG sizes and other demographic features(i.e., populations) #20220129
+df_filename = os.path.join(args.gt_root, args.msa_name, 'demographic_dataframe_%s_%sgroupsperfeat.csv' % (args.msa_name,NUM_GROUPS))
+data_df = pd.read_csv(df_filename)
+cbg_sizes = np.array(data_df['Sum'])
+hybrid_idx = np.array(data_df['Hybrid_Group']) 
+vac_flag_pos = np.zeros(cbg_sizes.shape)
 
 # Load and scale age-aware CBG-specific attack/death rates (original)
-cbg_death_rates_original = np.loadtxt(os.path.join(epic_data_root, MSA_NAME, 'cbg_death_rates_original_'+MSA_NAME))
+cbg_death_rates_original = np.loadtxt(os.path.join(epic_data_root, args.msa_name, 'cbg_death_rates_original_'+args.msa_name))
 cbg_attack_rates_original = np.ones(cbg_death_rates_original.shape)
 # The scaling factors are set according to a grid search
 attack_scale = 1 # Fix attack_scale
 cbg_attack_rates_scaled = cbg_attack_rates_original * attack_scale
-cbg_death_rates_scaled = cbg_death_rates_original * constants.death_scale_dict[MSA_NAME]
+cbg_death_rates_scaled = cbg_death_rates_original * constants.death_scale_dict[args.msa_name]
 # Vaccine acceptance
 vaccine_acceptance = np.ones(len(cbg_sizes)) # full acceptance
 # Calculate number of available vaccines, number of vaccines each cbg can have
-num_vaccines = cbg_sizes.sum() * VACCINATION_RATIO / NN
+num_vaccines = cbg_sizes.sum() * args.vaccination_ratio / args.NN
 print('Num of vaccines per CBG: ',num_vaccines)
     
 ############################################################################################
@@ -180,16 +162,16 @@ def run_simulation(starting_seed, num_seeds, vaccination_vector, vaccine_accepta
                                cbg_sizes=cbg_sizes,
                                poi_cbg_visits_list=poi_cbg_visits_list,
                                all_hours=all_hours,
-                               p_sick_at_t0=constants.parameters_dict[MSA_NAME][0],
+                               p_sick_at_t0=constants.parameters_dict[args.msa_name][0],
                                #vaccination_time=24*31, # when to apply vaccination (which hour)
-                               vaccination_time=24*VACCINATION_TIME, # when to apply vaccination (which hour)
+                               vaccination_time=24*args.vaccination_time, # when to apply vaccination (which hour)
                                vaccination_vector = vaccination_vector,
                                vaccine_acceptance=vaccine_acceptance,
                                protection_rate = protection_rate,
-                               home_beta=constants.parameters_dict[MSA_NAME][1],
+                               home_beta=constants.parameters_dict[args.msa_name][1],
                                cbg_attack_rates_original = cbg_attack_rates_scaled,
                                cbg_death_rates_original = cbg_death_rates_scaled,
-                               poi_psi=constants.parameters_dict[MSA_NAME][2],
+                               poi_psi=constants.parameters_dict[args.msa_name][2],
                                just_compute_r0=False,
                                latency_period=96,  # 4 days
                                infectious_period=84,  # 3.5 days
@@ -216,8 +198,7 @@ def traditional_evaluate(vac_flag, is_torch=False):
         vaccination_vector[torch.where(vac_flag.squeeze()!=0)[0].cpu().numpy()] = num_vaccines
         history_C2, history_D2 = run_simulation(starting_seed=STARTING_SEED, num_seeds=NUM_SEEDS, 
                                                 vaccination_vector=vaccination_vector,
-                                                vaccine_acceptance=vaccine_acceptance,
-                                                protection_rate = PROTECTION_RATE)
+                                                vaccine_acceptance=vaccine_acceptance)
         # Average history records across random seeds
         cases_cbg, deaths_cbg,_,_ = functions.average_across_random_seeds(history_C2,history_D2, 
                                                                         num_cbgs, idxs_msa_all, 
@@ -238,8 +219,7 @@ vaccination_vector_no_vaccination = np.zeros(len(cbg_sizes))
 # Run simulations
 history_C2_no_vaccination, history_D2_no_vaccination = run_simulation(starting_seed=STARTING_SEED, num_seeds=NUM_SEEDS, 
                                                             vaccination_vector=vaccination_vector_no_vaccination,
-                                                            vaccine_acceptance=vaccine_acceptance,
-                                                            protection_rate = PROTECTION_RATE)
+                                                            vaccine_acceptance=vaccine_acceptance)
 # Average history records across random seeds
 cases_cbg_no_vaccination, deaths_cbg_no_vaccination,_,_ = functions.average_across_random_seeds(history_C2_no_vaccination,history_D2_no_vaccination, 
                                                                                         num_cbgs, idxs_msa_all, 
@@ -310,9 +290,14 @@ deg_centrality = deg_centrality.reshape(-1,1)
 clo_centrality = clo_centrality.reshape(-1,1)
 bet_centrality = bet_centrality.reshape(-1,1)
 mob_level = mob_level.reshape(-1,1)
+hybrid_idx = hybrid_idx.reshape(-1,1)
+vac_flag_pos = vac_flag_pos.reshape(-1,1)
 
 #gen_node_feats = np.concatenate((node_feats[:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level), axis=1)
-gen_node_feats = np.concatenate((node_feats, deg_centrality, clo_centrality, bet_centrality, mob_level), axis=1)
+#gen_node_feats = np.concatenate((node_feats, deg_centrality, clo_centrality, bet_centrality, mob_level), axis=1)
+#gen_node_feats = np.concatenate((node_feats[:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, hybrid_idx, vac_flag_pos), axis=1) #20220129
+gen_node_feats = np.concatenate((node_feats[:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, hybrid_idx), axis=1) #20220129
+
 print('node_feats.shape: ', node_feats.shape) 
 gen_node_feats = np.tile(gen_node_feats,(1,2))
 print('node_feats.shape: ', gen_node_feats.shape) 
@@ -323,6 +308,7 @@ deg_centrality = torch.Tensor(deg_centrality)
 clo_centrality = torch.Tensor(clo_centrality)
 bet_centrality = torch.Tensor(bet_centrality)
 mob_level = torch.Tensor(mob_level)
+hybrid_idx = torch.Tensor(hybrid_idx) #20220129
 
 # Model and optimizer
 config = Config()
@@ -331,12 +317,15 @@ config.gcn_nfeat = config.dim_touched # Num of feats used to calculate embedding
 config.gcn_nhid = args.hidden 
 config.gcn_nclass = 32 
 config.gcn_dropout = args.dropout
-config.linear_nin = config.gcn_nclass + (gen_node_feats.shape[1]-config.dim_touched)
+#config.linear_nin = config.gcn_nclass + (gen_node_feats.shape[1]-config.dim_touched)
+config.linear_nin = config.gcn_nclass + (gen_node_feats.shape[1]-config.dim_touched)-1 #20220129 #最后一维是hybrid_group
+
 config.linear_nhid1 = 100 
 config.linear_nhid2 = 100
 config.linear_nout = 1 #20220126 
 
-model = get_model(config, 'Generator')
+#model = get_model(config, 'Generator')
+model = get_model(config, 'Hierarchical_Generator')
 print(model)
 
 optimizer = optim.Adam(model.parameters(),
@@ -354,24 +343,48 @@ if args.cuda:
     clo_centrality = clo_centrality.cuda() 
     bet_centrality = bet_centrality.cuda() 
     mob_level = mob_level.cuda() 
+    hybrid_idx = hybrid_idx.cuda() #20220129
     
 # Training
 traditional_evaluated_cases = []
 outcome_list = []
-current_best = 0 #cbg_sizes.sum()
+current_best = 0 
 for epoch in range(args.epochs):
     model.train()
     optimizer.zero_grad()
+
+    # Construct batch training sample
+    '''
+    group_idx_list = sorted(set(gen_node_feats[:,-2].cpu().numpy())) #最后一维用来当vac_flag，倒数第二维是所属的group
+    num_groups = len(group_idx_list)
+    num_samples_per_group = 5 #test
+    sampled_x = gen_node_feats.unsqueeze(0).repeat(num_groups*num_samples_per_group,1,1)
+    # Random sampling for each group
+    #group_feats =  torch.zeros(num_groups*num_samples_per_group, args.NN, x.shape[1]) #(22,5,70,18)
+    group_count = 0
+    pdb.set_trace()
+    for group_idx in group_idx_list:
+        #sampled_feats = torch.zeros(num_samples_per_group, args.NN, x.shape[1]); #print('sampled_feats.shape: ', sampled_feats.shape)
+        nodes = list(torch.where(gen_node_feats[:,-2]==group_idx)[0].cpu().numpy())
+        for sample_idx in range(num_samples_per_group):
+            sampled_nodes = random.sample(nodes, args.NN) # 从每个组采样NN个节点  
+            #sampled_feats[sample_idx] = x[sampled_nodes]
+            sampled_vac_flag = torch.zeros(gen_node_feats.shape[0])
+            sampled_vac_flag[sampled_nodes] = 1
+            sampled_x[sample_idx, :, -1] = sampled_vac_flag
+        group_count += 1
+    '''
+
 
     # Obtain indices of top-NN CBGs to be vaccinated
     vac_flag = model(gen_node_feats, adj) #policy = model(gen_node_feats, adj)
     print(torch.where(vac_flag.squeeze()!=0))
     
+    #pdb.set_trace()
     # Prepare inputs for PolicyEvaluator
     eval_node_feats = torch.cat((node_feats, vac_flag, deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag, vac_flag), axis=1) #20220128 
     eval_node_feats = eval_node_feats.unsqueeze(axis=0)
-    if args.cuda:
-        eval_node_feats = eval_node_feats.cuda()
+    if args.cuda: eval_node_feats = eval_node_feats.cuda()
 
     # Run evaluation
     # Evaluate with traditional simulator (slow)

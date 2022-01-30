@@ -9,6 +9,7 @@ from torch.nn import Parameter, Linear, Sequential, Module #20220112
 from activaition import get as get_activation
 import torch 
 from torch_geometric.nn import TopKPooling #20220127
+import random #20220129
 
 import pdb
 
@@ -191,11 +192,82 @@ class Generator(nn.Module): #20220126
         #vac_flag = vac_flag * topk_mask
         vac_flag = (x[:,-1].unsqueeze(dim=1)) * topk_mask
         '''
+        return vac_flag
+
+'''
+class Hierarchical_Generator_Depracated(nn.Module): #20220129
+    def __init__(self, config):
+        nn.Module.__init__(self)
+        self.GCNLayer_1 = GCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout)
+        self.MLPLayers_1 = MLPLayers(config.linear_nin, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_activation, config.linear_bias)
+        self.GCNLayer_2 = GCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout)
+        self.MLPLayers_2 = MLPLayers(config.linear_nin, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_activation, config.linear_bias)
+        self.dim_touched = config.dim_touched
+
+    def forward(self, x, adj):
         
+        group_idx_list = sorted(set(x[:,-2].cpu().numpy())) #最后一维用来当vac_flag，倒数第二维是所属的group
+        num_groups = len(group_idx_list)
+        num_samples_per_group = 5 #test
+        # Random sampling for each group
+        group_feats =  torch.zeros(num_groups, num_samples_per_group, NN, x.shape[1]) #(22,5,70,18)
+        group_count = 0
+        pdb.set_trace()
+        for group_idx in group_idx_list:
+            sampled_feats = torch.zeros(num_samples_per_group, NN, x.shape[1]); #print('sampled_feats.shape: ', sampled_feats.shape)
+            nodes = list(torch.where(x[:,-1]==group_idx)[0].cpu().numpy())
+            for sample_idx in range(num_samples_per_group):
+                sampled_nodes = random.sample(nodes, NN) # 从每个组采样NN个节  
+                #sampled_feats[sample_idx] = torch.mean(x[sampled_nodes], dim=0) # 特征取平均
+                sampled_feats[sample_idx] = x[sampled_nodes]
+            #sampled_feats = torch.mean(sampled_feats, dim=0) # 用5个样本特征均值的均值代表该组特征
+            
+            group_feats[group_count] = sampled_feats
+            group_count += 1
+
+        pdb.set_trace()
+        gcn_output_1 = self.GCNLayer_1.forward(x[:,:self.dim_touched], adj) 
+        gcn_output_1 = torch.cat((gcn_output_1, x[:,self.dim_touched:]), dim=1) #20220123
+        mlp_output_1 = self.MLPLayers_1.forward(gcn_output_1) 
+        
+        sorted_indices = torch.argsort(mlp_output_1,dim=0,descending=True) #20220128 # 返回从大到小的索引
+        one = torch.ones_like(mlp_output_1)
+        zero = torch.zeros_like(mlp_output_1)
+        topk_mask = torch.where(mlp_output_1>mlp_output_1[sorted_indices[0]], one, zero)
+        vac_flag = mlp_output_1 * topk_mask
+
+        return vac_flag
+'''
+
+
+class Hierarchical_Generator(nn.Module): #20220129
+    def __init__(self, config):
+        nn.Module.__init__(self)
+        self.GCNLayer = GCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout)
+        self.MLPLayers = MLPLayers(config.linear_nin, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_activation, config.linear_bias)
+        self.dim_touched = config.dim_touched
+
+    def forward(self, x, adj):
+        #pdb.set_trace()
+        all_gcn_output = self.GCNLayer.forward(x[:,:self.dim_touched], adj) 
+        all_gcn_output = torch.cat((all_gcn_output, x[:,self.dim_touched:-1]), dim=1) #20220129
+        mlp_output = self.MLPLayers.forward(all_gcn_output) 
+        target_group = 0 #test
+        min_value = torch.ones_like(mlp_output)
+        min_value = (min_value * torch.min(mlp_output)).squeeze()
+        mlp_output = torch.where(x[:,-1]==target_group, min_value, mlp_output.squeeze()).unsqueeze(1)
+        sorted_indices = torch.argsort(mlp_output,dim=0,descending=True) #20220128 # 返回从大到小的索引
+        # Only select CBGs from a group
+        #group_idx_list = sorted(set(x[:,-1].cpu().numpy())) #最后一维是所属的group
+        #num_groups = len(group_idx_list)
+
+        reverse = torch.reciprocal(mlp_output.detach())
+        zero = torch.zeros_like(mlp_output.detach())
+        topk_mask = torch.where(mlp_output>mlp_output[sorted_indices[NN]], reverse, zero)
+        vac_flag = mlp_output * topk_mask #这玩意儿不是0/1啊，老铁
         #pdb.set_trace()
 
-        #return topk_values,topk_indices
-        #return x
+
         return vac_flag
 
 
@@ -222,4 +294,6 @@ def get_model(config, model_name='GCN'):
         '''
     elif(model_name=='Generator'): #20220126
         layers = Generator(config)
+    elif(model_name=='Hierarchical_Generator'): #20220129
+        layers = Hierarchical_Generator(config)
     return layers

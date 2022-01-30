@@ -1,5 +1,5 @@
 # python gt-gen-vac-fixed-num-cbgs.py MSA_NAME RANDOM_SEED NN NUM_EXPERIMENTS quick_test
-# python gt-gen-vac-fixed-num-cbgs.py Atlanta 66 100 100 False
+# python gt-gen-vac-fixed-num-cbgs.py SanFrancisco 66 70 100 False
 
 import setproctitle
 setproctitle.setproctitle("gnn-simu-vac@chenlin")
@@ -301,6 +301,44 @@ def assign_hybrid_group(data):
 data['Hybrid_Group'] = data.apply(lambda x : assign_hybrid_group(x), axis=1)
 
 ###############################################################################
+# 分层——采样：
+# 首先检查每组人数，若小于target_num，则与邻组合并。#(若是第一组，则与后一组合并，否则与前一组合并。)
+#(若是最后一组，则与前一组合并，否则与后一组合并。)
+target_pop = data['Sum'].sum() * VACCINATION_RATIO 
+target_cbg_num = NN+10 # at least contains (NN+10) CBGs
+count = 0
+max_group_idx = int(NUM_GROUPS*NUM_GROUPS*NUM_GROUPS)
+for i in range(max_group_idx):
+    print(len(data[data['Hybrid_Group']==i]))
+    if(len(data[data['Hybrid_Group']==i])>0):
+        count += 1
+    if((data[data['Hybrid_Group']==i]['Sum'].sum()<target_pop) or (len(data[data['Hybrid_Group']==i])<target_cbg_num)):
+        if(i==max_group_idx-1): 
+            #data[data['Hybrid_Group']==i]['Hybrid_Group'] = 1
+            data['Hybrid_Group'] = data['Hybrid_Group'].apply(lambda x : max_group_idx-2 if x==i else x)
+        else:
+            #data[data['Hybrid_Group']==i]['Hybrid_Group'] = i-1
+            data['Hybrid_Group'] = data['Hybrid_Group'].apply(lambda x : i+1 if x==i else x)
+print('Num of groups: ', count)
+
+# Recheck after merging
+print('Recheck:')
+count = 0
+for i in range(max_group_idx):
+    print(len(data[data['Hybrid_Group']==i]))
+    if(len(data[data['Hybrid_Group']==i])>0):
+        count += 1
+print('Num of groups: ', count)
+
+# Store filename
+df_filename = os.path.join(gt_result_root, MSA_NAME, 
+                           'demographic_dataframe_%s_%sgroupsperfeat.csv' % (MSA_NAME,NUM_GROUPS))
+print('Path to save constructed dataframe: ', df_filename)
+pdb.set_trace()
+data.to_csv(df_filename)
+
+
+###############################################################################
 # Make dataframe
 result_df = pd.DataFrame(columns=['Vaccinated_Idxs','Total_Cases','Case_Rates_STD','Total_Deaths','Death_Rates_STD'])
 # Vaccine acceptance
@@ -331,37 +369,6 @@ result_df = result_df.append({'Vaccinated_Idxs':[],
                               'Death_Rates_STD':death_rates_std_no_vaccination,
                             }, ignore_index=True)
 print(result_df)  
-
-
-###############################################################################
-# 分层——采样：
-# 首先检查每组人数，若小于target_num，则与邻组合并。#(若是第一组，则与后一组合并，否则与前一组合并。)
-#(若是最后一组，则与前一组合并，否则与后一组合并。)
-target_pop = data['Sum'].sum() * VACCINATION_RATIO 
-target_cbg_num = NN+10 # at least contains (NN+10) CBGs
-count = 0
-max_group_idx = int(NUM_GROUPS*NUM_GROUPS*NUM_GROUPS)
-for i in range(max_group_idx):
-    print(len(data[data['Hybrid_Group']==i]))
-    if(len(data[data['Hybrid_Group']==i])>0):
-        count += 1
-    if((data[data['Hybrid_Group']==i]['Sum'].sum()<target_pop) or (len(data[data['Hybrid_Group']==i])<target_cbg_num)):
-        if(i==max_group_idx-1): 
-            #data[data['Hybrid_Group']==i]['Hybrid_Group'] = 1
-            data['Hybrid_Group'] = data['Hybrid_Group'].apply(lambda x : max_group_idx-2 if x==i else x)
-        else:
-            #data[data['Hybrid_Group']==i]['Hybrid_Group'] = i-1
-            data['Hybrid_Group'] = data['Hybrid_Group'].apply(lambda x : i+1 if x==i else x)
-print('Num of groups: ', count)
-
-# Recheck after merging
-print('Recheck:')
-count = 0
-for i in range(max_group_idx):
-    print(len(data[data['Hybrid_Group']==i]))
-    if(len(data[data['Hybrid_Group']==i])>0):
-        count += 1
-print('Num of groups: ', count)
 
 ###############################################################################
 # Randomly choose NN CBGs for vaccine distribution
