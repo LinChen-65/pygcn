@@ -18,7 +18,7 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 import random
-#from torch.utils.data import DataLoader, random_split
+from pytorchtools import EarlyStopping
 
 import time
 import pdb
@@ -73,6 +73,9 @@ parser.add_argument('--with_original_feat', default= False, action='store_true',
                     help='Whether to concat original features')                    
 parser.add_argument('--target_code', type=int,
                     help='Prediction target: 0 for total_cases, 1 for case_std.')
+# 20220131
+parser.add_argument('--NN', type=int,
+                    help='Number of CBGs to receive vaccines.')
 
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -85,9 +88,57 @@ print('args.quicktest: ', args.quicktest)
 print('args.with_pretrained_embed: ', args.with_pretrained_embed)
 print('args.with_original_feat: ', args.with_original_feat)
 print('args.target_code: ', args.target_code)
+print('args.normalize: ', args.normalize)
+
+vac_result_path_list = [f'test_safe_0.01_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed42_40seeds_1000samples_proportional.csv',
+                        f'test_safe_0.01_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed88_40seeds_1000samples_proportional.csv',
+                        f'test_safe_0.005_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed65_40seeds_1000samples_proportional.csv',
+                        f'test_safe_0.0_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed22_40seeds_1000samples_proportional.csv',
+                        f'test_safe_0.0_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed56_40seeds_1000samples_proportional.csv',
+                        f'safe_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed42_40seeds_1000samples_proportional.csv']
+vac_result_path_combined = os.path.join(args.gt_root, args.msa_name, f'vac_results_{args.msa_name}_0.01_{args.NN}_40seeds_combined')
+if(os.path.exists(vac_result_path_combined)):
+    print('Continue, and vac_result_combined file exists. Wanna recombine?')
+    pdb.set_trace()
+count = 0
+for path in vac_result_path_list:
+    data_df = pd.read_csv(os.path.join(args.gt_root, args.msa_name,path));print('len(data_df): ',len(data_df))
+    if(count==0):
+        vac_result = data_df.copy()
+    else:
+        vac_result = pd.concat([vac_result,data_df],axis=0)
+    count += 1
+    print('len(vac_result): ', len(vac_result))
+vac_result = vac_result.drop_duplicates()
+print('After dropping duplicates, len(vac_result): ', len(vac_result)) 
+vac_result.to_csv(vac_result_path_combined)
+pdb.set_trace()
+
+'''
+vac_result_path_1 = os.path.join(args.gt_root, args.msa_name, f'test_safe_0.01_crossgroup_vac_results_SanFrancisco_0.01_{args.NN}_randomseed42_40seeds_1000samples_proportional.csv') #20220201
+vac_result_path_2 = os.path.join(args.gt_root, args.msa_name, f'test_safe_0.01_crossgroup_vac_results_SanFrancisco_0.01_{args.NN}_randomseed88_40seeds_1000samples_proportional.csv') #20220201
+vac_result_path_3 = os.path.join(args.gt_root, args.msa_name, 'safe_crossgroup_vac_results_SanFrancisco_0.01_20_randomseed42_40seeds_1000samples_proportional.csv')
+vac_result_1 = pd.read_csv(vac_result_path_1)
+vac_result_2 = pd.read_csv(vac_result_path_2)
+vac_result_3 = pd.read_csv(vac_result_path_3)
+len_1 = len(vac_result_1);print('len_1: ', len_1)
+len_2 = len(vac_result_2);print('len_2: ', len_2)
+len_3 = len(vac_result_3);print('len_3: ', len_3)
+vac_result = pd.concat([vac_result_1,vac_result_2,vac_result_3],axis=0)
+len_combined = len(vac_result);print('len_combined: ', len_combined)
+vac_result = vac_result.drop_duplicates()
+len_combined = len(vac_result);print('After dropping duplicates, len_combined: ', len_combined)           
+vac_result.to_csv(vac_result_path_combined)
+'''
 
 # Load data
-vac_result_path = os.path.join(args.gt_root, args.msa_name, 'vac_results_SanFrancisco_0.02_70_randomseed42_40seeds_1000samples_proportional.csv') #20220120
+#vac_result_path = os.path.join(args.gt_root, args.msa_name, 'vac_results_SanFrancisco_0.02_70_randomseed42_40seeds_1000samples_proportional.csv') #20220120
+#vac_result_path = os.path.join(args.gt_root, args.msa_name, f'test_crossgroup_vac_results_SanFrancisco_0.01_{args.NN}_randomseed42_40seeds_1000samples_proportional.csv') #20220131
+#vac_result_path = os.path.join(args.gt_root, args.msa_name, f'test_safe_0.01_crossgroup_vac_results_SanFrancisco_0.01_{args.NN}_randomseed66_2seeds_1000samples_proportional.csv') #20220131
+#vac_result_path = os.path.join(args.gt_root, args.msa_name, f'test_safe_0.01_crossgroup_vac_results_SanFrancisco_0.01_{args.NN}_randomseed42_40seeds_1000samples_proportional.csv') #20220201
+#vac_result_path = vac_result_path_3
+vac_result_path = vac_result_path_combined #20220201
+ 
 output_root = os.path.join(args.gt_root, args.msa_name)
 pretrained_embed_path = os.path.join(args.prefix,'chenlin/code-dynalearn/scripts/figure-6/gt-generator/covid/outputs/node_embeddings_b1.0.npy' )
 
@@ -131,12 +182,23 @@ bet_centrality = G_ig.betweenness()
 mob_level = np.sum(adj, axis=1)
 
 
+# Normalization
+if(args.normalize):
+    print('Normalization.')
+    scaler = preprocessing.StandardScaler()
+    deg_centrality = scaler.fit_transform(np.array(deg_centrality).reshape(-1,1)).squeeze()
+    clo_centrality = scaler.fit_transform(np.array(clo_centrality).reshape(-1,1)).squeeze()
+    bet_centrality = scaler.fit_transform(np.array(bet_centrality).reshape(-1,1)).squeeze()
+    mob_level = scaler.fit_transform(np.array(mob_level).reshape(-1,1)).squeeze()
+
 num_samples = node_feats.shape[0]
 deg_centrality = torch.Tensor(np.tile(deg_centrality,(num_samples,1))).unsqueeze(axis=2) #20220120
 clo_centrality = torch.Tensor(np.tile(clo_centrality,(num_samples,1))).unsqueeze(axis=2) #20220120
 bet_centrality = torch.Tensor(np.tile(bet_centrality,(num_samples,1))).unsqueeze(axis=2) #20220120
 mob_level = torch.Tensor(np.tile(mob_level,(num_samples,1))).unsqueeze(axis=2) #20220120
 vac_flag = node_feats[:,:,-1].unsqueeze(axis=2)
+
+
 
 if(args.target_code==0):
     target_identifier = 'total_cases' #20220127 #total_cases
@@ -174,9 +236,8 @@ elif((not args.with_pretrained_embed) & (args.with_original_feat)):
 #node_feats = np.concatenate((node_feats, deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag), axis=2) #20220127
 
 print('node_feats.shape: ', node_feats.shape) #(num_samples, num_cbgs, dim_features) #最后一维1=vac，0=no_vac
-model_save_path = os.path.join(args.prefix, args.model_save_folder, f'{target_identifier}_{feature_identifier}_{args.epochs}epochs_20220127.pt')
+model_save_path = os.path.join(args.prefix, args.model_save_folder, f'{target_identifier}_{feature_identifier}_{args.epochs}epochs_20220131.pt')
 print('model_save_path: ', model_save_path)
-#pdb.set_trace()
 
 
 node_feats = torch.Tensor(node_feats)
@@ -198,19 +259,33 @@ train_loader, val_loader, test_loader = data_loader(node_feats,graph_labels,idx_
 
 # Model and optimizer
 config = Config()
+config.NN = args.NN #20220131
 #config.dim_touched = 9 # Num of feats used to calculate embedding #20220123
 #config.dim_touched = node_feats.shape[2]-1 # Num of feats used to calculate embedding #20220127
 config.dim_touched = dim_touched # Num of feats used to calculate embedding #20220127
 
 config.gcn_nfeat = config.dim_touched # Num of feats used to calculate embedding #20220123
 config.gcn_nhid = args.hidden 
+'''#初代版本
 config.gcn_nclass = 32 #50 #8 #16 #100#200 #20220119 #8(20220114)
+'''
+config.gcn_nclass = config.gcn_nhid #20220201
 config.gcn_dropout = args.dropout
 
-config.linear_nin = config.gcn_nclass-1 + (node_feats.shape[2]-config.dim_touched)
+
+config.linear_nin = config.gcn_nclass-1 + (node_feats.shape[2]-config.dim_touched) #初代版本
+#config.linear_nin = (config.gcn_nclass-1 + (node_feats.shape[2]-config.dim_touched)) * config.NN
+#config.linear_nin = (config.gcn_nclass-1 + (node_feats.shape[2]-config.dim_touched)) * 4
+ #初代版本
+'''
 config.linear_nhid1 = 100 #8#64
 config.linear_nhid2 = 100
+'''
+config.linear_nhid1 = 32 #64 #100 #8
+config.linear_nhid2 = 32 #64 #100
+
 config.linear_nout = 1
+
 
 model = get_model(config, 'GNN_OVER_MLP')
 print(model)
@@ -221,15 +296,22 @@ optimizer = optim.Adam(model.parameters(),
                        lr=args.lr, weight_decay=args.weight_decay)
 
 #scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=70, gamma=0.1) #20220122
-scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer,'min',factor=0.5, patience=6, min_lr=1e-8, verbose=True) #20220122
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer,'min',factor=0.5, patience=8, min_lr=1e-8, verbose=True) #20220122
 
-random.seed(42)
+# 初始化 early_stopping 对象 #20220201
+patience = 40 #20	# 当验证集损失在连续20次训练周期中都没有得到降低时，停止模型训练，以防止模型过拟合
+checkpoint_save_path = os.path.join(args.prefix, args.model_save_folder, f'checkpoint_{target_identifier}_{feature_identifier}_{args.epochs}epochs_20220201.pt')
+print('checkpoint_save_path: ', checkpoint_save_path)
+early_stopping = EarlyStopping(patience, verbose=False, path=checkpoint_save_path)	# 关于 EarlyStopping 的代码可先看博客后面的内容
+
+#random.seed(66) #42 #没有影响
 
 
 def train(epoch,min_valid_loss):
     train_loss = 0.0
     model.train()
     for (batch_x, batch_y) in train_loader:
+        #pdb.set_trace()
         optimizer.zero_grad()
         output = model(batch_x, adj) #20220121
         loss = F.mse_loss(output.squeeze(), batch_y)
@@ -247,15 +329,24 @@ def train(epoch,min_valid_loss):
             output = model(batch_x, adj) #20220121
             loss= F.mse_loss(output.squeeze(), batch_y)
             valid_loss += loss.item()
+        valid_loss /= len(val_loader)
+        early_stopping(valid_loss, model)
+        
+        print(f'Epoch {epoch+1} \t\t Training Loss: {train_loss / len(train_loader)} \t\t Validation Loss: {valid_loss}')
+        if min_valid_loss > valid_loss:
+            print(f'Validation Loss Decreased({min_valid_loss:.6f}--->{valid_loss:.6f}) \t Saving The Model')
+            min_valid_loss = valid_loss
+        
+        # 若满足 early stopping 要求 #20220201
+        if early_stopping.early_stop:
+            print("Early stopping")
+            # 结束模型训练
+            return False
 
-    print(f'Epoch {epoch+1} \t\t Training Loss: {train_loss / len(train_loader)} \t\t Validation Loss: {valid_loss / len(val_loader)}')
-    if min_valid_loss > valid_loss:
-        print(f'Validation Loss Decreased({min_valid_loss:.6f}--->{valid_loss:.6f}) \t Saving The Model')
-        min_valid_loss = valid_loss
-    return (train_loss/len(train_loader)), (valid_loss/len(val_loader)),min_valid_loss     
+        return (train_loss/len(train_loader)), (valid_loss), min_valid_loss     
 
 
-def test(loader):
+def test(loader,verbose=True):
     model.eval()
     test_loss = 0.0
     output_test_list = []
@@ -268,9 +359,11 @@ def test(loader):
         output_test_list = output_test_list + output.squeeze().tolist()
         truth_test_list = truth_test_list + batch_y.squeeze().tolist()
 
+    
     print(f'test loss: {test_loss / len(loader)}')
-    print('output_test_list: ', output_test_list)
-    print('truth_test_list: ', truth_test_list)
+    if(verbose):
+        print('output_test_list: ', output_test_list)
+        print('truth_test_list: ', truth_test_list)
 
 
 
@@ -280,10 +373,17 @@ min_val_loss = np.inf
 train_loss_record = []
 val_loss_record = []
 for epoch in range(args.epochs):
-    train_loss, val_loss, min_val_loss = train(epoch,min_val_loss)
-    train_loss_record.append(train_loss)
-    val_loss_record.append(val_loss)
-    scheduler.step(train_loss) #val_loss
+    result = train(epoch,min_val_loss)
+    if(result==False): 
+        # load the last checkpoint with the best model
+        model.load_state_dict(torch.load(checkpoint_save_path))
+        break
+    else:
+        train_loss, val_loss, min_val_loss = result
+        train_loss_record.append(train_loss)
+        val_loss_record.append(val_loss)
+        #scheduler.step(train_loss) #val_loss
+        scheduler.step(val_loss) #20220131
 
 
 print("Optimization Finished!")

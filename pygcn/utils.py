@@ -69,10 +69,14 @@ def load_vac_results(vac_result_path, rel_result): #20220117, 拆分代码
     #idx_val = range(int(0.8*num_samples), int(0.9*num_samples))
     #idx_test = range(int(0.9*num_samples), int(num_samples))
     shuffled = np.arange(num_samples)
+    np.random.seed(42) #20220201
     np.random.shuffle(shuffled) #20220119
+
     idx_train = shuffled[:int(0.8*num_samples)]
-    idx_val = shuffled[int(0.8*num_samples):int(0.9*num_samples)]
-    idx_test = shuffled[int(0.9*num_samples):]
+    #idx_val = shuffled[int(0.8*num_samples):int(0.9*num_samples)]
+    #idx_test = shuffled[int(0.9*num_samples):]
+    idx_test = shuffled[int(0.8*num_samples):int(0.9*num_samples)]
+    idx_val = shuffled[int(0.9*num_samples):]
 
     # Wrap in tensor 
     idx_train = torch.LongTensor(idx_train)
@@ -275,6 +279,12 @@ def load_data(vac_result_path="../data/cora/", dataset="cora", msa_name=None, mo
             if(normalize): # Data normalization #20220127
                 # Obtain statistics on train set -> Apply to all data
                 scaler = preprocessing.StandardScaler()
+                cbg_sizes = scaler.fit_transform(cbg_sizes)
+                cbg_elder_ratio = scaler.fit_transform(cbg_elder_ratio)
+                cbg_household_income = scaler.fit_transform(cbg_household_income)
+                cbg_ew_ratio = scaler.fit_transform(cbg_ew_ratio)
+                pretrained_embed = scaler.fit_transform(pretrained_embed)
+                '''
                 scaler.fit(cbg_sizes[idx_train])
                 cbg_sizes = scaler.transform(cbg_sizes)
                 scaler.fit(cbg_elder_ratio[idx_train])
@@ -285,6 +295,7 @@ def load_data(vac_result_path="../data/cora/", dataset="cora", msa_name=None, mo
                 cbg_ew_ratio = scaler.transform(cbg_ew_ratio)
                 scaler.fit(pretrained_embed[idx_train])
                 pretrained_embed = scaler.transform(pretrained_embed)
+                '''
             
             node_feats = np.zeros(((num_samples, num_cbgs, 5+num_embed)))
             node_feats[:,:,0] = cbg_sizes.reshape(1,-1)
@@ -331,7 +342,8 @@ def load_data(vac_result_path="../data/cora/", dataset="cora", msa_name=None, mo
     elif(dataset=='cora'):
         """Load citation network dataset (cora only for now)"""
         print('Loading {} dataset...'.format(dataset))
-
+        pdb.set_trace()
+        '''
         idx_features_labels = np.genfromtxt("{}{}.content".format(vac_result_path, dataset),
                                             dtype=np.dtype(str))
         features = sp.csr_matrix(idx_features_labels[:, 1:-1], dtype=np.float32)
@@ -367,7 +379,7 @@ def load_data(vac_result_path="../data/cora/", dataset="cora", msa_name=None, mo
         idx_test = torch.LongTensor(idx_test)
 
         return adj, features, labels, idx_train, idx_val, idx_test
-
+        '''
     else:
         print('Invalid dataset. Please check.')
         pdb.set_trace()

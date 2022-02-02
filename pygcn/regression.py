@@ -43,7 +43,9 @@ print('args.rel_result: ', args.rel_result)
 #vac_result_path = os.path.join(args.gt_root, args.msa_name, 'vac_results_SanFrancisco_0.02_200_randomseed66_30seeds_1000samples.csv') #20220113
 #vac_result_path = os.path.join(args.gt_root, args.msa_name, 'vac_results_SanFrancisco_0.02_100_randomseed66_30seeds_1000samples_proportional.csv') #20220118
 #vac_result_path = os.path.join(args.gt_root, args.msa_name, 'test_vac_results_SanFrancisco_0.02_70_randomseed42_40seeds_1000samples_proportional.csv') #20220119
+vac_result_path = os.path.join(args.gt_root, args.msa_name, 'vac_results_SanFrancisco_0.01_20_40seeds_combined') #20220201 #生成过程见gnn-over-mlp.py
 
+'''
 vac_result_path = os.path.join(args.gt_root, args.msa_name, 'vac_results_SanFrancisco_0.02_100_randomseed66_30seeds_1000samples_proportional_all.csv') #20220118
 if(not os.path.exists(vac_result_path)):
     df_1 = pd.read_csv(os.path.join(args.gt_root, args.msa_name, 'vac_results_SanFrancisco_0.02_70_randomseed42_40seeds_1000samples_proportional.csv'))
@@ -55,7 +57,7 @@ if(not os.path.exists(vac_result_path)):
     print(len(df_combined))
     pdb.set_trace()
     df_combined.to_csv(vac_result_path)
-    
+'''    
 output_root = os.path.join(args.gt_root, args.msa_name)
 adj, node_feats, graph_labels, idx_train, idx_val, idx_test = load_data(vac_result_path=vac_result_path, #20220113
                                                                 dataset=f'safegraph-',

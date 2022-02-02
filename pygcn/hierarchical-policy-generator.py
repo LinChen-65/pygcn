@@ -69,11 +69,11 @@ parser.add_argument('--prefix', default= '/home',
 parser.add_argument('--trained_evaluator_folder', default= 'chenlin/pygcn/pygcn/trained_model', 
                     help='Folder to reload trained evaluator model.')
 #20220129
-parser.add_argument('--vaccination_ratio', default=0.02, 
+parser.add_argument('--vaccination_ratio', default=0.01, #0.02
                     help='Vaccination ratio (w.r.t. total population).')
 parser.add_argument('--vaccination_time', default=0, #31
                     help='Time to distribute vaccines.')                    
-parser.add_argument('--NN', default=70, 
+parser.add_argument('--NN', type=int, default=70,
                     help='Num of CBGs to receive vaccines.')
 
 
@@ -85,7 +85,9 @@ torch.manual_seed(args.seed)
 if args.cuda:
     torch.cuda.manual_seed(args.seed)
 print('args.rel_result: ', args.rel_result)
-evaluator_path = os.path.join(args.prefix, args.trained_evaluator_folder, 'total_cases_20220126.pt')
+
+#evaluator_path = os.path.join(args.prefix, args.trained_evaluator_folder, 'total_cases_20220126.pt')
+evaluator_path = os.path.join(args.prefix, args.trained_evaluator_folder, 'total_cases_of_250epochs_20220131.pt')
 print('evaluator_path: ', evaluator_path)
 
 
@@ -95,13 +97,11 @@ print('evaluator_path: ', evaluator_path)
 epic_data_root = '/data/chenlin/COVID-19/Data'
 MIN_DATETIME = datetime.datetime(2020, 3, 1, 0)
 MAX_DATETIME = datetime.datetime(2020, 5, 2, 23)
-NUM_DAYS = 63
 NUM_GROUPS = 3 #5
 
 MSA_NAME_FULL = constants.MSA_NAME_FULL_DICT[args.msa_name]
 # Random Seed
-RANDOM_SEED = 42
-NUM_SEEDS = 4 #40
+NUM_SEEDS = 40; print('NUM_SEEDS: ', NUM_SEEDS)
 STARTING_SEED = range(NUM_SEEDS)
 # Load POI-CBG visiting matrices
 f = open(os.path.join(epic_data_root, args.msa_name, '%s_2020-03-01_to_2020-05-02.pkl'%MSA_NAME_FULL), 'rb') 
@@ -324,6 +324,8 @@ config.linear_nhid1 = 100
 config.linear_nhid2 = 100
 config.linear_nout = 1 #20220126 
 
+config.NN = args.NN #20220201
+
 #model = get_model(config, 'Generator')
 model = get_model(config, 'Hierarchical_Generator')
 print(model)
@@ -348,6 +350,7 @@ if args.cuda:
 # Training
 traditional_evaluated_cases = []
 outcome_list = []
+train_loss_list = []
 current_best = 0 
 for epoch in range(args.epochs):
     model.train()
@@ -382,17 +385,20 @@ for epoch in range(args.epochs):
     
     #pdb.set_trace()
     # Prepare inputs for PolicyEvaluator
-    eval_node_feats = torch.cat((node_feats, vac_flag, deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag, vac_flag), axis=1) #20220128 
+    #eval_node_feats = torch.cat((node_feats, vac_flag, deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag, vac_flag), axis=1) #20220128 
+    eval_node_feats = torch.cat((node_feats[:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, node_feats[:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag), axis=1) #20220201
+    
     eval_node_feats = eval_node_feats.unsqueeze(axis=0)
     if args.cuda: eval_node_feats = eval_node_feats.cuda()
 
     # Run evaluation
     # Evaluate with traditional simulator (slow)
+    '''
     total_cases, case_std = traditional_evaluate(vac_flag)
     print(f'total_cases: {total_cases}, case_std: {case_std}.')
     traditional_evaluated_cases.append(total_cases)
     # train_loss = -total_cases
-    
+    '''
     # Evaluate with trained GNN predictor (fast but less accurate)
     #outcome = evaluator(eval_node_feats, adj); print('outcome: ', outcome)
     #train_loss = -(evaluator(eval_node_feats, adj)) * (1+(-(evaluator(eval_node_feats, adj)))/current_best)#-outcome * (1+(-(outcome.detach()))/current_best)
@@ -403,13 +409,13 @@ for epoch in range(args.epochs):
     #train_loss = -outcome * (1+(-outcome)/current_best) #直接这么写会报错:RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation
     #train_loss = -outcome * (1+(-(outcome.detach()))/current_best)
     print('train_loss: ', train_loss)
-    #pdb.set_trace()
+    train_loss_list.append(train_loss.item())
 
     # Backprop
     with torch.autograd.set_detect_anomaly(True):
         train_loss.backward(retain_graph=True) #loss.backward()
     
-    print('traditional_evaluated_cases: ', traditional_evaluated_cases, ', current_best: ', current_best)
+    #print('traditional_evaluated_cases: ', traditional_evaluated_cases, ', current_best: ', current_best)
     #outcome_list.append(outcome)
     #current_best = np.array(outcome_list).min()
     #current_best = min(current_best, outcome)
@@ -419,5 +425,6 @@ for epoch in range(args.epochs):
     #scheduler.step(train_loss)
 
 print('traditional_evaluated_cases: ', traditional_evaluated_cases)
+print('trained_loss_list: ', train_loss_list)
 
 pdb.set_trace()

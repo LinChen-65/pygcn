@@ -44,8 +44,6 @@ print('VACCINATION_TIME: ', VACCINATION_TIME)
 
 NUM_GROUPS_FOR_GINI = 5
 NUM_GROUPS_FOR_RANDOMBAG = 3
-#NUM_DIM = 3 # Age, Income, EW
-NUM_DIM = 5 # Age, Income, EW, Vulner, Damage
 
 ###############################################################################
 # Main variable settings
@@ -199,39 +197,6 @@ def output_result(cbg_table, demo_feat, policy_list, num_groups, rel_to, print_r
 
     return results
 
-def make_gini_table(policy_list, demo_feat_list, rel_to, num_groups, save_result=False, save_path=None):
-    
-    cbg_table_name_dict=dict()
-    cbg_table_name_dict['Age'] = cbg_age_msa
-    cbg_table_name_dict['Mean_Household_Income'] = cbg_income_msa
-    cbg_table_name_dict['Essential_Worker'] = cbg_occupation_msa
-    
-    print('Policy list: ', policy_list)
-    print('Demographic feature list: ', demo_feat_list)
-
-    gini_df = pd.DataFrame(columns=pd.MultiIndex.from_tuples([('All','deaths_total_abs'),('All','deaths_total_rel')]))
-    gini_df['Policy'] = policy_list
-        
-    for demo_feat in demo_feat_list:
-        results = output_result(cbg_table_name_dict[demo_feat], 
-                                demo_feat, policy_list, num_groups=NUM_GROUPS,
-                                print_result=False, rel_to=rel_to)
-       
-        for i in range(len(policy_list)):
-            policy = policy_list[i]
-            gini_df.loc[i,('All','deaths_total_abs')] = results[policy]['deaths_total_abs']
-            gini_df.loc[i,('All','deaths_total_rel')] = results[policy]['deaths_total_rel'] #if abs(float(results[policy]['deaths_total_rel']))>=0.01 else 0
-            gini_df.loc[i,(demo_feat,'deaths_gini_abs')] = results[policy]['deaths_gini_abs']
-            gini_df.loc[i,(demo_feat,'deaths_gini_rel')] = results[policy]['deaths_gini_rel'] #if abs(float(results[policy]['deaths_gini_rel']))>=0.01 else 0
-
-    gini_df.set_index(['Policy'],inplace=True)
-    # Transpose
-    gini_df_trans = pd.DataFrame(gini_df.values.T, index=gini_df.columns, columns=gini_df.index)#转置
-    # Save .csv
-    if(save_result==True):
-        gini_df_trans.to_csv(save_path)
-        
-    return gini_df_trans
     
 ###############################################################################
 # Load Data
@@ -378,14 +343,12 @@ cbg_income_msa['Mean_Household_Income_Quantile_FOR_GINI'] =  cbg_income_msa['Mea
 
 cbg_death_rates_original = np.loadtxt(os.path.join(epic_data_root, MSA_NAME, 'cbg_death_rates_original_'+MSA_NAME))
 cbg_attack_rates_original = np.ones(cbg_death_rates_original.shape)
-#print('Age-aware CBG-specific death rates loaded. Attack rates are irrelevant to age.')
 
 # The scaling factors are set according to a grid search
 # Fix attack_scale
 attack_scale = 1
 cbg_attack_rates_scaled = cbg_attack_rates_original * attack_scale
 cbg_death_rates_scaled = cbg_death_rates_original * constants.death_scale_dict[MSA_NAME]
-#print('Age-aware CBG-specific death rates scaled.')
 
 ###############################################################################
 # Compute vulnerability and damage

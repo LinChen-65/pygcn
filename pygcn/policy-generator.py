@@ -3,7 +3,6 @@
 import setproctitle
 setproctitle.setproctitle("gnn-simu-vac@chenlin")
 
-#from utils import load_data, visualize
 from utils import *
 import argparse
 import os
@@ -12,8 +11,6 @@ import networkx as nx
 import igraph as ig
 import numpy as np
 import pandas as pd
-import statsmodels.api as sm
-from statsmodels.stats.outliers_influence import summary_table
 from sklearn import preprocessing
 from models import get_model
 from config import *
@@ -72,6 +69,9 @@ parser.add_argument('--prefix', default= '/home',
 #20220127
 parser.add_argument('--trained_evaluator_folder', default= 'chenlin/pygcn/pygcn/trained_model', 
                     help='Folder to reload trained evaluator model.')
+# 20220131
+parser.add_argument('--NN', type=int,
+                    help='Number of CBGs to receive vaccines.')
 
 args = parser.parse_args()
 # Check important parameters
@@ -81,7 +81,9 @@ torch.manual_seed(args.seed)
 if args.cuda:
     torch.cuda.manual_seed(args.seed)
 print('args.rel_result: ', args.rel_result)
-evaluator_path = os.path.join(args.prefix, args.trained_evaluator_folder, 'total_cases_20220126.pt')
+
+#evaluator_path = os.path.join(args.prefix, args.trained_evaluator_folder, 'total_cases_20220126.pt')
+evaluator_path = os.path.join(args.prefix, args.trained_evaluator_folder, 'total_cases_of_250epochs_20220131.pt')
 print('evaluator_path: ', evaluator_path)
 
 
@@ -91,10 +93,9 @@ print('evaluator_path: ', evaluator_path)
 epic_data_root = '/data/chenlin/COVID-19/Data'
 MIN_DATETIME = datetime.datetime(2020, 3, 1, 0)
 MAX_DATETIME = datetime.datetime(2020, 5, 2, 23)
-NUM_DAYS = 63
-NUM_GROUPS = 3 #5
+
 # Vaccination ratio
-VACCINATION_RATIO = 0.02
+VACCINATION_RATIO = 0.01 #0.02
 print('VACCINATION_RATIO: ', VACCINATION_RATIO)
 # Vaccination protection rate
 PROTECTION_RATE = 1
@@ -105,10 +106,8 @@ VACCINATION_TIME = 0 #31
 print('VACCINATION_TIME: ', VACCINATION_TIME)
 MSA_NAME = args.msa_name
 MSA_NAME_FULL = constants.MSA_NAME_FULL_DICT[MSA_NAME]
-# Divide the available vaccines to how many CBGs
-NN = 70
+
 # Random Seed
-RANDOM_SEED = 42
 NUM_SEEDS = 40 #40
 STARTING_SEED = range(NUM_SEEDS)
 # Load POI-CBG visiting matrices
@@ -164,7 +163,7 @@ cbg_death_rates_scaled = cbg_death_rates_original * constants.death_scale_dict[M
 # Vaccine acceptance
 vaccine_acceptance = np.ones(len(cbg_sizes)) # full acceptance
 # Calculate number of available vaccines, number of vaccines each cbg can have
-num_vaccines = cbg_sizes.sum() * VACCINATION_RATIO / NN
+num_vaccines = cbg_sizes.sum() * VACCINATION_RATIO / args.NN
 print('Num of vaccines per CBG: ',num_vaccines)
     
 ############################################################################################
@@ -311,8 +310,8 @@ clo_centrality = clo_centrality.reshape(-1,1)
 bet_centrality = bet_centrality.reshape(-1,1)
 mob_level = mob_level.reshape(-1,1)
 
-#gen_node_feats = np.concatenate((node_feats[:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level), axis=1)
-gen_node_feats = np.concatenate((node_feats, deg_centrality, clo_centrality, bet_centrality, mob_level), axis=1)
+gen_node_feats = np.concatenate((node_feats[:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level), axis=1)
+#gen_node_feats = np.concatenate((node_feats, deg_centrality, clo_centrality, bet_centrality, mob_level), axis=1)
 print('node_feats.shape: ', node_feats.shape) 
 gen_node_feats = np.tile(gen_node_feats,(1,2))
 print('node_feats.shape: ', gen_node_feats.shape) 
@@ -335,9 +334,11 @@ config.linear_nin = config.gcn_nclass + (gen_node_feats.shape[1]-config.dim_touc
 config.linear_nhid1 = 100 
 config.linear_nhid2 = 100
 config.linear_nout = 1 #20220126 
+config.NN = args.NN #20220201
 
 model = get_model(config, 'Generator')
 print(model)
+
 
 optimizer = optim.Adam(model.parameters(),
                        lr=args.lr, weight_decay=args.weight_decay)
@@ -368,16 +369,21 @@ for epoch in range(args.epochs):
     print(torch.where(vac_flag.squeeze()!=0))
     
     # Prepare inputs for PolicyEvaluator
-    eval_node_feats = torch.cat((node_feats, vac_flag, deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag, vac_flag), axis=1) #20220128 
+    #eval_node_feats = torch.cat((node_feats, vac_flag, deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag, vac_flag), axis=1) #20220128 
+    #eval_node_feats = torch.cat((node_feats[:,:4], vac_flag, deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag, vac_flag), axis=1) #20220128 
+    eval_node_feats = torch.cat((node_feats[:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, node_feats[:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag), axis=1) #20220201
+    #pdb.set_trace()
     eval_node_feats = eval_node_feats.unsqueeze(axis=0)
     if args.cuda:
         eval_node_feats = eval_node_feats.cuda()
 
     # Run evaluation
     # Evaluate with traditional simulator (slow)
+    '''
     total_cases, case_std = traditional_evaluate(vac_flag)
     print(f'total_cases: {total_cases}, case_std: {case_std}.')
     traditional_evaluated_cases.append(total_cases)
+    '''
     # train_loss = -total_cases
     
     # Evaluate with trained GNN predictor (fast but less accurate)
@@ -396,7 +402,7 @@ for epoch in range(args.epochs):
     with torch.autograd.set_detect_anomaly(True):
         train_loss.backward(retain_graph=True) #loss.backward()
     
-    print('traditional_evaluated_cases: ', traditional_evaluated_cases, ', current_best: ', current_best)
+   # print('traditional_evaluated_cases: ', traditional_evaluated_cases, ', current_best: ', current_best)
     #outcome_list.append(outcome)
     #current_best = np.array(outcome_list).min()
     #current_best = min(current_best, outcome)

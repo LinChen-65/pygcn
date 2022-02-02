@@ -89,7 +89,7 @@ class Model:
         #numpy.clip(a, a_min, a_max, out=None, **kwargs)
         self.VACCINATION_VECTOR = np.clip(self.VACCINATION_VECTOR, None, (self.CBG_SIZES*self.VACCINE_ACCEPTANCE))
         print('Toal num of vaccines: ', vaccination_vector.sum())
-        print('Considering vaccine acceptance, actual num of vaccines: ', self.VACCINATION_VECTOR.sum())
+        #print('Considering vaccine acceptance, actual num of vaccines: ', self.VACCINATION_VECTOR.sum())
         self.PROTECTION_RATE = protection_rate
         self.just_compute_r0 = just_compute_r0
         self.confirmation_rate = confirmation_rate

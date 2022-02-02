@@ -13,10 +13,10 @@ import random #20220129
 
 import pdb
 
-NN = 70 # Num of CBGs to be selected
+#NN = 70 # Num of CBGs to be selected
 
 class GCN(nn.Module):
-    def __init__(self, nfeat, nhid, nclass, dropout):
+    def __init__(self, nfeat, nhid, nclass, dropout, NN):
         super(GCN, self).__init__()
 
         self.gc1 = GraphConvolution(nfeat, nhid)
@@ -36,6 +36,8 @@ class GCN(nn.Module):
         #self.gc6 = GraphConvolution(nhid, nclass) #20220122 #如果gc6是output layer
 
         self.dropout = dropout
+        self.NN = NN # Num of CBGs to be selected
+
 
     def apply_bn(self, x): #20220122 #BatchNorm
         ''' Batch normalization of 3D tensor x
@@ -50,14 +52,12 @@ class GCN(nn.Module):
         x = self.apply_bn(F.relu(self.gc1(x, adj))) #20220122 #先activate再BatchNorm
         #x = F.dropout(x, self.dropout, training=self.training)
 
-        #x = self.gc2(x, adj) #如果gc2是output layer
-        #x = F.relu(self.gc2(x, adj))
+        #x = F.relu(self.gc2(x, adj)) #如果gc2是output layer
         #x = self.apply_bn(x) #20220122 #BatchNorm
         #x = F.relu(self.apply_bn(self.gc2(x, adj))) #20220122 #先BatchNorm再activate
         x = self.apply_bn(F.relu(self.gc2(x, adj))) #20220122 #先activate再BatchNorm
         #x = F.dropout(x, self.dropout, training=self.training)
 
-        #x = self.gc3(x, adj) #如果gc3是output layer
         #x = F.relu(self.gc3(x, adj)) #如果gc3是output layer
         #x = F.dropout(x, self.dropout, training=self.training)
         #x = F.relu(self.apply_bn(self.gc3(x, adj))) #20220122 #先BatchNorm再activate
@@ -125,7 +125,18 @@ class PoolLayer(nn.Module): #20220120
 
     def forward(self, x):
         x = ((x.T)*(x[:,:,-1].T)).T #mask
-        x_avg =  (torch.sum(x[:,:,:-1],axis=1)/(len(torch.nonzero(x[0,:,-1],as_tuple=True)[0])))
+        ''' # 初代模型
+        x_avg =  (torch.sum(x[:,:,:-1],axis=1)/(len(torch.nonzero(x[0,:,-1],as_tuple=True)[0]))) #初代模型
+        output = x_avg
+        '''
+        
+        #output =  torch.flatten(x[:,torch.nonzero(x[0,:,-1]).squeeze(),:-1],start_dim=1,end_dim=-1) # 把NN个拿到疫苗的CBG的特征串联 #效果不好 #20220131 
+        x_avg =  (torch.sum(x[:,:,:-1],axis=1)/(len(torch.nonzero(x[0,:,-1],as_tuple=True)[0]))) #初代模型
+        #x_std = torch.std(x[:,(x[0,:,-1]).nonzero().squeeze(),:-1],dim=1) #20220131 #很多0，训练时loss变nan
+        #x_max = torch.max(x[:,(x[0,:,-1]).nonzero().squeeze(),:-1],dim=1)[0] #20220131
+        #x_min = torch.min(x[:,(x[0,:,-1]).nonzero().squeeze(),:-1],dim=1)[0] #20220131
+        output = x_avg
+        #output = torch.cat((x_avg, x_std,x_max, x_min), dim=1).squeeze()
 
         #x_avg =  torch.mean(x[torch.nonzero(x[:,:,-1],as_tuple=True)[0],torch.nonzero(x[:,:,-1],as_tuple=True)[1],:-1], axis=0).unsqueeze(axis=1)
         #x_std =  torch.std(x[torch.nonzero(x[:,:,-1],as_tuple=True)[0],torch.nonzero(x[:,:,-1],as_tuple=True)[1],:-1], axis=0).unsqueeze(axis=1)
@@ -134,7 +145,7 @@ class PoolLayer(nn.Module): #20220120
         #x_avg =  torch.mean(x[torch.nonzero(x[:,-1],as_tuple=True)[0],:-1], axis=0).unsqueeze(axis=1)
         #x_std =  torch.std(x[torch.nonzero(x[:,-1],as_tuple=True)[0],:-1], axis=0).unsqueeze(axis=1)
         #output = torch.cat((x_avg, x_std), dim=0).squeeze()
-        output = x_avg
+        
         return output
 
 
@@ -142,7 +153,7 @@ class PoolLayer(nn.Module): #20220120
 class GCN_OVER_MLP(nn.Module): #20220121
     def __init__(self, config):
         nn.Module.__init__(self)
-        self.GCNLayer = GCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout)
+        self.GCNLayer = GCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout,config.NN)
         self.PoolLayer = PoolLayer()
         self.MLPLayers = MLPLayers(config.linear_nin, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_activation, config.linear_bias)
         self.dim_touched = config.dim_touched
@@ -170,22 +181,30 @@ class GCN_OVER_MLP(nn.Module): #20220121
 class Generator(nn.Module): #20220126
     def __init__(self, config):
         nn.Module.__init__(self)
-        self.GCNLayer = GCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout)
+        self.GCNLayer = GCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout,config.NN)
         self.MLPLayers = MLPLayers(config.linear_nin, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_activation, config.linear_bias)
         self.dim_touched = config.dim_touched
+        self.NN = config.NN #20220201
 
     def forward(self, x, adj):
         all_gcn_output = self.GCNLayer.forward(x[:,:self.dim_touched], adj) 
         all_gcn_output = torch.cat((all_gcn_output, x[:,self.dim_touched:]), dim=1) #20220123
         mlp_output = self.MLPLayers.forward(all_gcn_output) 
+
         sorted_indices = torch.argsort(mlp_output,dim=0,descending=True) #20220128 # 返回从大到小的索引
+        reverse = torch.reciprocal(mlp_output.detach())
+        zero = torch.zeros_like(mlp_output.detach())
+        topk_mask = torch.where(mlp_output>mlp_output[sorted_indices[self.NN]], reverse, zero)
+        vac_flag = mlp_output * topk_mask
+        '''
         one = torch.ones_like(mlp_output)
         zero = torch.zeros_like(mlp_output)
-        topk_mask = torch.where(mlp_output>mlp_output[sorted_indices[NN]], one, zero)
-        vac_flag = mlp_output * topk_mask
+        topk_mask = torch.where(mlp_output>mlp_output[sorted_indices[self.NN]], one, zero)
+        vac_flag = mlp_output * topk_mask #这玩意儿不是0/1啊，老铁
+        '''
 
         '''
-        topk_values, topk_indices = torch.topk(mlp_output.squeeze(),NN) #20220127 #返回一个元组 (values,indices) 不行，indices没有梯度
+        topk_values, topk_indices = torch.topk(mlp_output.squeeze(),self.NN) #20220127 #返回一个元组 (values,indices) 不行，indices没有梯度
         topk_mask = torch.zeros(mlp_output.shape).cuda()
         topk_mask[topk_indices] = 1
         #vac_flag = torch.ones(x.shape).cuda()
@@ -210,14 +229,14 @@ class Hierarchical_Generator_Depracated(nn.Module): #20220129
         num_groups = len(group_idx_list)
         num_samples_per_group = 5 #test
         # Random sampling for each group
-        group_feats =  torch.zeros(num_groups, num_samples_per_group, NN, x.shape[1]) #(22,5,70,18)
+        group_feats =  torch.zeros(num_groups, num_samples_per_group, self.NN, x.shape[1]) #(22,5,70,18)
         group_count = 0
         pdb.set_trace()
         for group_idx in group_idx_list:
-            sampled_feats = torch.zeros(num_samples_per_group, NN, x.shape[1]); #print('sampled_feats.shape: ', sampled_feats.shape)
+            sampled_feats = torch.zeros(num_samples_per_group, self.NN, x.shape[1]); #print('sampled_feats.shape: ', sampled_feats.shape)
             nodes = list(torch.where(x[:,-1]==group_idx)[0].cpu().numpy())
             for sample_idx in range(num_samples_per_group):
-                sampled_nodes = random.sample(nodes, NN) # 从每个组采样NN个节  
+                sampled_nodes = random.sample(nodes, self.NN) # 从每个组采样self.NN个节点  
                 #sampled_feats[sample_idx] = torch.mean(x[sampled_nodes], dim=0) # 特征取平均
                 sampled_feats[sample_idx] = x[sampled_nodes]
             #sampled_feats = torch.mean(sampled_feats, dim=0) # 用5个样本特征均值的均值代表该组特征
@@ -243,9 +262,10 @@ class Hierarchical_Generator_Depracated(nn.Module): #20220129
 class Hierarchical_Generator(nn.Module): #20220129
     def __init__(self, config):
         nn.Module.__init__(self)
-        self.GCNLayer = GCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout)
+        self.GCNLayer = GCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout,config.NN)
         self.MLPLayers = MLPLayers(config.linear_nin, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_activation, config.linear_bias)
         self.dim_touched = config.dim_touched
+        self.NN = config.NN #20220201
 
     def forward(self, x, adj):
         #pdb.set_trace()
@@ -263,10 +283,8 @@ class Hierarchical_Generator(nn.Module): #20220129
 
         reverse = torch.reciprocal(mlp_output.detach())
         zero = torch.zeros_like(mlp_output.detach())
-        topk_mask = torch.where(mlp_output>mlp_output[sorted_indices[NN]], reverse, zero)
-        vac_flag = mlp_output * topk_mask #这玩意儿不是0/1啊，老铁
-        #pdb.set_trace()
-
+        topk_mask = torch.where(mlp_output>mlp_output[sorted_indices[self.NN]], reverse, zero)
+        vac_flag = mlp_output * topk_mask #这玩意儿不是0/1啊，老铁(solved)
 
         return vac_flag
 
@@ -275,7 +293,7 @@ def get_model(config, model_name='GCN'):
     if(model_name=='GCN'):
         layers = Sequential(
             #GCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout), #original
-            GCN(config.gcn_nfeat, config.gcn_nhid1, config.gcn_nhid2, config.gcn_nclass, config.gcn_dropout), #20220119
+            GCN(config.gcn_nfeat, config.gcn_nhid1, config.gcn_nhid2, config.gcn_nclass, config.gcn_dropout,config.NN), #20220119
             LinearLayers(config.linear_nin, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_activation, config.linear_bias)
         )
     elif(model_name=='MLP'):
