@@ -467,9 +467,9 @@ print(result_df)
 ###############################################################################
 # Randomly choose args.NN CBGs for vaccine distribution
 random.seed(args.random_seed)
+start = time.time()
 
 if(args.grouping): # Grouping: 按args.num_groups分位数，将全体CBG分为args.num_groups个组，将分割点存储在separators中
-    start = time.time()
     NUM_GROUPWISE = int(args.num_experiments/count)
     print('Number of samples per group: ', NUM_GROUPWISE)
     for group_idx in range(max_group_idx):

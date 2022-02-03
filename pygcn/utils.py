@@ -9,10 +9,9 @@ import os
 import sys
 import pickle
 import pdb
-import time
 from sklearn import preprocessing
 import matplotlib.pyplot as plt
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset
 
 sys.path.append(os.path.join(os.getcwd(), '../gt-generator'))
 import constants
@@ -419,7 +418,7 @@ def visualize(data, bins, save_path): #20220119
     print('Figure saved at: ', save_path)
 
 
-def data_loader(node_feats, graph_labels, idx_train, idx_val, idx_test, batch_size, quicktest=False): #20220127
+def data_loader(node_feats, graph_labels, idx_train, idx_val, idx_test, batch_size, kfold=False, quicktest=False): #20220127
     # Divide data into train/val/test datasets; Wrap data into DataLoader
     if(quicktest):
         batch_size = 2
@@ -430,17 +429,28 @@ def data_loader(node_feats, graph_labels, idx_train, idx_val, idx_test, batch_si
     train_dataset = torch.utils.data.TensorDataset(node_feats[idx_train,:,:],graph_labels[idx_train])
     val_dataset = torch.utils.data.TensorDataset(node_feats[idx_val,:,:],graph_labels[idx_val])
     test_dataset = torch.utils.data.TensorDataset(node_feats[idx_test,:,:],graph_labels[idx_test])
-        
-    train_loader = DataLoader(
-        train_dataset, #train_dataset.dataset,
-        batch_size=batch_size,
-        shuffle=True)
-    val_loader = DataLoader(
-        val_dataset, #val_dataset.dataset,
-        batch_size=batch_size,
-        shuffle=True)
-    test_loader = DataLoader(
-        test_dataset,#test_dataset.dataset,
-        batch_size=batch_size,
-        shuffle=False) #shuffle=True)
-    return train_loader, val_loader, test_loader 
+
+    if(kfold): #20220202
+        train_val_dataset = ConcatDataset([train_dataset, val_dataset])
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=batch_size,
+            shuffle=False) 
+        return train_val_dataset, test_loader 
+    else:   
+        train_loader = DataLoader(
+            train_dataset, #train_dataset.dataset,
+            batch_size=batch_size,
+            shuffle=True)
+        val_loader = DataLoader(
+            val_dataset, #val_dataset.dataset,
+            batch_size=batch_size,
+            shuffle=False) #shuffle=True)
+        test_loader = DataLoader(
+            test_dataset,#test_dataset.dataset,
+            batch_size=batch_size,
+            shuffle=False) #shuffle=True)
+        return train_loader, val_loader, test_loader 
+
+
+
