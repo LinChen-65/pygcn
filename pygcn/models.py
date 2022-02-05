@@ -1,5 +1,5 @@
-from multiprocessing import Pool
-from turtle import forward
+#from multiprocessing import Pool
+#from turtle import forward
 import torch.nn as nn
 import torch.nn.functional as F
 #from pygcn.layers import GraphConvolution #original
@@ -7,8 +7,8 @@ from layers import GraphConvolution #20220112
 
 from torch.nn import Parameter, Linear, Sequential, Module #20220112
 import torch 
-from torch_geometric.nn import TopKPooling #20220127
-import random #20220129
+#from torch_geometric.nn import TopKPooling #20220127
+#import random #20220129
 
 import pdb
 
@@ -70,6 +70,112 @@ class GCN(nn.Module):
         return x
 
 
+class GeneratorGCN(nn.Module):
+    def __init__(self, nfeat, nhid, nclass, dropout, NN):
+        super(GeneratorGCN, self).__init__()
+
+        self.gc1 = GraphConvolution(nfeat, nhid)
+
+        #self.gc2 = GraphConvolution(nhid, nclass) #如果gc2是output layer
+        self.gc2 = GraphConvolution(nhid, nhid) #20220122
+
+        self.gc3 = GraphConvolution(nhid, nclass) #20220122 #如果gc3是output layer
+        #self.gc3 = GraphConvolution(nhid, nhid) #20220122
+
+        #self.gc4 = GraphConvolution(nhid, nclass) #20220122 #如果gc4是output layer
+        #self.gc4 = GraphConvolution(nhid, nhid) #20220122
+
+        #self.gc5 = GraphConvolution(nhid, nclass) #20220122 #如果gc5是output layer
+        #self.gc5 = GraphConvolution(nhid, nhid) #20220122
+
+        self.dropout = dropout
+        self.NN = NN # Num of CBGs to be selected
+
+
+    def apply_bn(self, x): #20220122 #BatchNorm
+        ''' Batch normalization of 3D tensor x
+        '''
+        bn_module = nn.BatchNorm1d(x.size()[1]).cuda()
+        return bn_module(x)
+
+    def forward(self, x, adj):
+        x = F.relu(self.gc1(x, adj)) #original #(20220121)leaky_relu也没用
+        #x = self.apply_bn(F.relu(self.gc1(x, adj))) #20220122 #先activate再BatchNorm
+        #x = F.dropout(x, self.dropout, training=self.training)
+
+        x = F.relu(self.gc2(x, adj)) #如果gc2是output layer
+        #x = self.apply_bn(F.relu(self.gc2(x, adj))) #20220122 #先activate再BatchNorm
+        #x = F.dropout(x, self.dropout, training=self.training)
+
+        x = F.relu(self.gc3(x, adj)) #如果gc3是output layer
+        #x = self.apply_bn(F.relu(self.gc3(x, adj))) #20220122 #先activate再BatchNorm
+        #x = F.dropout(x, self.dropout, training=self.training)
+
+        #x = F.relu(self.gc4(x, adj)) #如果gc4是output layer
+        #x = self.apply_bn(F.relu(self.gc4(x, adj))) #20220122 #先activate再BatchNorm
+        #x = F.dropout(x, self.dropout, training=self.training)
+
+        #x = F.relu(self.gc5(x, adj)) #如果gc5是output layer
+
+        #return F.log_softmax(x, dim=1) #original #cannot converge
+        #return x #20220121 #when test, output identical values close to 0
+        #return F.relu(x) #20220121 #when train, loss=nan, 调小lr可以缓解
+        return x
+
+
+class SoftGeneratorGCN(nn.Module):
+    def __init__(self, nfeat, nhid, nclass, dropout, NN):
+        super(SoftGeneratorGCN, self).__init__()
+
+        self.gc1 = GraphConvolution(nfeat, nhid)
+
+        #self.gc2 = GraphConvolution(nhid, nclass) #如果gc2是output layer
+        self.gc2 = GraphConvolution(nhid, nhid) #20220122
+
+        self.gc3 = GraphConvolution(nhid, nclass) #20220122 #如果gc3是output layer
+        #self.gc3 = GraphConvolution(nhid, nhid) #20220122
+
+        #self.gc4 = GraphConvolution(nhid, nclass) #20220122 #如果gc4是output layer
+        #self.gc4 = GraphConvolution(nhid, nhid) #20220122
+
+        #self.gc5 = GraphConvolution(nhid, nclass) #20220122 #如果gc5是output layer
+        #self.gc5 = GraphConvolution(nhid, nhid) #20220122
+
+        self.dropout = dropout
+        self.NN = NN # Num of CBGs to be selected
+
+
+    def apply_bn(self, x): #20220122 #BatchNorm
+        ''' Batch normalization of 3D tensor x
+        '''
+        bn_module = nn.BatchNorm1d(x.size()[1]).cuda()
+        return bn_module(x)
+
+    def forward(self, x, adj):
+        x = F.relu(self.gc1(x, adj)) #original #(20220121)leaky_relu也没用
+        #x = self.apply_bn(F.relu(self.gc1(x, adj))) #20220122 #先activate再BatchNorm
+        #x = F.dropout(x, self.dropout, training=self.training)
+
+        x = F.relu(self.gc2(x, adj)) #如果gc2是output layer
+        #x = self.apply_bn(F.relu(self.gc2(x, adj))) #20220122 #先activate再BatchNorm
+        #x = F.dropout(x, self.dropout, training=self.training)
+
+        x = F.relu(self.gc3(x, adj)) #如果gc3是output layer
+        #x = self.apply_bn(F.relu(self.gc3(x, adj))) #20220122 #先activate再BatchNorm
+        #x = F.dropout(x, self.dropout, training=self.training)
+
+        #x = F.relu(self.gc4(x, adj)) #如果gc4是output layer
+        #x = self.apply_bn(F.relu(self.gc4(x, adj))) #20220122 #先activate再BatchNorm
+        #x = F.dropout(x, self.dropout, training=self.training)
+
+        #x = F.relu(self.gc5(x, adj)) #如果gc5是output layer
+
+        #return F.log_softmax(x, dim=1) #original #cannot converge
+        #return x #20220121 #when test, output identical values close to 0
+        #return F.relu(x) #20220121 #when train, loss=nan, 调小lr可以缓解
+        return x
+
+#######################################################################
 class LinearLayers(nn.Module): #20220112
     def __init__(self, nin, nhid1, nhid2, nout=1, activation="relu", bias=True):
         nn.Module.__init__(self)
@@ -106,9 +212,60 @@ class MLPLayers(nn.Module): #20220120
         x = F.relu(self.linear1(x))
         x = F.relu(self.linear2(x))
         x = self.linear3(x)
+        
         return x
 
 
+class GeneratorMLPLayers(nn.Module): #202201203
+    def __init__(self, nin, nhid1, nhid2, nout=1, activation='relu', bias=True):
+        nn.Module.__init__(self)
+        self.bias = bias
+        self.linear1 = Linear(nin, nhid1, bias=self.bias)
+        self.linear2 = Linear(nhid1, nhid2, bias=self.bias)
+        self.linear3 = Linear(nhid2, nout, bias=self.bias)
+
+    def apply_bn(self, x): #20220122 #BatchNorm
+        ''' Batch normalization of 3D tensor x
+        '''
+        bn_module = nn.BatchNorm1d(x.size()[1]).cuda()
+        return bn_module(x)
+
+    def forward(self, x):
+        x = self.apply_bn(F.relu(self.linear1(x)))
+        x = self.apply_bn(F.relu(self.linear2(x)))
+        #x = F.relu(self.linear1(x))
+        #x = F.relu(self.linear2(x))
+        x = self.linear3(x)
+        #x = F.softmax(self.linear3(x))
+        return x
+
+
+class SoftGeneratorMLPLayers(nn.Module): #202201203
+    def __init__(self, nin, nhid1, nhid2, nout=1, activation='relu', bias=True):
+        nn.Module.__init__(self)
+        self.bias = bias
+        self.linear1 = Linear(nin, nhid1, bias=self.bias)
+        self.linear2 = Linear(nhid1, nhid2, bias=self.bias)
+        self.linear3 = Linear(nhid2, nout, bias=self.bias)
+
+    def apply_bn(self, x): #20220122 #BatchNorm
+        ''' Batch normalization of 3D tensor x
+        '''
+        bn_module = nn.BatchNorm1d(x.size()[1]).cuda()
+        return bn_module(x)
+
+    def forward(self, x):
+        x = self.apply_bn(F.relu(self.linear1(x)))
+        x = self.apply_bn(F.relu(self.linear2(x)))
+        #x = F.relu(self.linear1(x))
+        #x = F.relu(self.linear2(x))
+        
+        #x = self.linear3(x)
+        #pdb.set_trace()
+        x = F.softmax(self.linear3(x),dim=0)
+        return x
+
+#######################################################################
 class PoolLayer(nn.Module): #20220120
     def __init__(self):
         nn.Module.__init__(self)
@@ -131,7 +288,7 @@ class PoolLayer(nn.Module): #20220120
         return output
 
 
-
+#######################################################################
 class GCN_OVER_MLP(nn.Module): #20220121
     def __init__(self, config):
         nn.Module.__init__(self)
@@ -161,15 +318,17 @@ class GCN_OVER_MLP(nn.Module): #20220121
 class Generator(nn.Module): #20220126
     def __init__(self, config):
         nn.Module.__init__(self)
-        self.GCNLayer = GCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout,config.NN)
-        self.MLPLayers = MLPLayers(config.linear_nin, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_activation, config.linear_bias)
+        self.GCNLayer = GeneratorGCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout,config.NN)
+        self.MLPLayers = GeneratorMLPLayers(config.linear_nin, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_activation, config.linear_bias)
         self.dim_touched = config.dim_touched
         self.NN = config.NN #20220201
+        
 
     def forward(self, x, adj):
         all_gcn_output = self.GCNLayer.forward(x[:,:self.dim_touched], adj) 
         all_gcn_output = torch.cat((all_gcn_output, x[:,self.dim_touched:]), dim=1) #20220123
         mlp_output = self.MLPLayers.forward(all_gcn_output) 
+        print(mlp_output.max().item(), mlp_output.min().item(), mlp_output.mean().item(), mlp_output.std().item())
 
         sorted_indices = torch.argsort(mlp_output,dim=0,descending=True) #20220128 # 返回从大到小的索引
         reverse = torch.reciprocal(mlp_output.detach())
@@ -183,9 +342,9 @@ class Generator(nn.Module): #20220126
 class Hierarchical_Generator_Depracated(nn.Module): #20220129
     def __init__(self, config):
         nn.Module.__init__(self)
-        self.GCNLayer_1 = GCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout)
+        self.GCNLayer_1 = GeneratorGCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout)
         self.MLPLayers_1 = MLPLayers(config.linear_nin, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_activation, config.linear_bias)
-        self.GCNLayer_2 = GCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout)
+        self.GCNLayer_2 = GeneratorGCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout)
         self.MLPLayers_2 = MLPLayers(config.linear_nin, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_activation, config.linear_bias)
         self.dim_touched = config.dim_touched
 
@@ -228,7 +387,7 @@ class Hierarchical_Generator_Depracated(nn.Module): #20220129
 class Hierarchical_Generator(nn.Module): #20220129
     def __init__(self, config):
         nn.Module.__init__(self)
-        self.GCNLayer = GCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout,config.NN)
+        self.GCNLayer = GeneratorGCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout,config.NN)
         self.MLPLayers = MLPLayers(config.linear_nin, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_activation, config.linear_bias)
         self.dim_touched = config.dim_touched
         self.NN = config.NN #20220201
@@ -254,6 +413,37 @@ class Hierarchical_Generator(nn.Module): #20220129
         return vac_flag
 
 
+
+class SoftGenerator(nn.Module): #20220203
+    def __init__(self, config):
+        nn.Module.__init__(self)
+        self.GCNLayer = SoftGeneratorGCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout,config.NN)
+        self.MLPLayers = SoftGeneratorMLPLayers(config.linear_nin, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_activation, config.linear_bias)
+        self.dim_touched = config.dim_touched
+        self.NN = config.NN #20220201
+        self.saved_log_probs = [] #20220203
+        self.rewards = [] #20220203
+
+        
+    def forward(self, x, adj):
+        all_gcn_output = self.GCNLayer.forward(x[:,:self.dim_touched], adj) 
+        all_gcn_output = torch.cat((all_gcn_output, x[:,self.dim_touched:]), dim=1) #20220123
+        mlp_output = self.MLPLayers.forward(all_gcn_output) 
+        '''
+        print(mlp_output.max().item(), mlp_output.min().item(), mlp_output.mean().item(), mlp_output.std().item())
+
+        sorted_indices = torch.argsort(mlp_output,dim=0,descending=True) #20220128 # 返回从大到小的索引
+        reverse = torch.reciprocal(mlp_output.detach())
+        zero = torch.zeros_like(mlp_output.detach())
+        topk_mask = torch.where(mlp_output>mlp_output[sorted_indices[self.NN]], reverse, zero)
+        vac_flag = mlp_output * topk_mask
+
+        return vac_flag
+        '''
+        return mlp_output
+
+
+#######################################################################
 def get_model(config, model_name='GCN'):
     if(model_name=='GCN'):
         layers = Sequential(
@@ -272,15 +462,7 @@ def get_model(config, model_name='GCN'):
         layers = Generator(config)
     elif(model_name=='Hierarchical_Generator'): #20220129
         layers = Hierarchical_Generator(config)
-
+    elif(model_name=='SoftGenerator'): #20220203
+        layers = SoftGenerator(config)
     return layers
 
-'''
-class LogCoshLoss(torch.nn.Module): #20220202
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, y_t, y_prime_t):
-        ey_t = y_t - y_prime_t
-        return torch.mean(torch.log(torch.cosh(ey_t + 1e-12)))
-'''

@@ -1,3 +1,5 @@
+#dl3: python gnn-over-mlp.py --msa_name SanFrancisco --mob_data_root '/data/chenlin/COVID-19/Data' --rel_result --epochs 250 --prefix /data --with_original_feat --target_code 0 --lr 0.005 --NN 20
+#rl4: python gnn-over-mlp.py --msa_name SanFrancisco --mob_data_root '/home/chenlin/COVID-19/Data' --rel_result --epochs 250 --prefix /home --with_original_feat --target_code 0 --lr 0.005 --NN 20
 import setproctitle
 setproctitle.setproctitle("gnn-simu-vac@chenlin")
 
@@ -18,17 +20,17 @@ import torch.optim as optim
 from pytorchtools import EarlyStopping
 from scipy.stats import spearmanr
 import datetime
-from sklearn.model_selection import KFold
-from torch.utils.data import Dataset, DataLoader,TensorDataset,random_split,SubsetRandomSampler, ConcatDataset
+#from sklearn.model_selection import KFold
+#from torch.utils.data import Dataset, DataLoader,TensorDataset,random_split,SubsetRandomSampler, ConcatDataset
 
 import time
 import pdb
 
-sys.path.append(os.path.join(os.getcwd(), '../gt-generator'))
-import constants
+#sys.path.append(os.path.join(os.getcwd(), '../gt-generator'))
+#import constants
 
 # 限制显卡使用
-os.environ["CUDA_VISIBLE_DEVICES"] = "1" #"0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # Training settings
 parser = argparse.ArgumentParser()
@@ -82,6 +84,9 @@ parser.add_argument('--batch_size', type=int, default=20,
                     help='Batch size.')
 parser.add_argument('--kfold', default=False, action='store_true',
                     help='Whether apply k-fold cross validation.')                    
+# 20220203
+parser.add_argument('--resume', default=False, action='store_true',
+                    help='Whether to continue training from saved checkpoint.')    
 
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -100,12 +105,19 @@ today = str(datetime.date.today()).replace('-','') # yyyy-mm-dd -> yyyymmdd
 print('today: ', today)
 
 # Combine multiple data files
-vac_result_path_list = [#f'test_safe_0.01_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed42_40seeds_1000samples_proportional.csv',
-                        #f'test_safe_0.01_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed88_40seeds_1000samples_proportional.csv',
-                        #f'test_safe_0.005_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed65_40seeds_1000samples_proportional.csv',
-                        f'test_safe_0.0_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed22_40seeds_1000samples_proportional.csv',
-                        f'test_safe_0.0_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed56_40seeds_1000samples_proportional.csv',
-                        f'safe_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed42_40seeds_1000samples_proportional.csv']
+vac_result_path_list = [f'safe_0.01_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed42_40seeds_1000samples_proportional.csv',
+                        f'safe_0.01_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed88_40seeds_1000samples_proportional.csv',
+                        f'test_safe_0.005_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed65_40seeds_1000samples_proportional.csv',
+                        f'safe_0.0_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed22_40seeds_1000samples_proportional.csv',
+                        f'safe_0.0_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed56_40seeds_1000samples_proportional.csv',
+                        f'safe_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed42_40seeds_1000samples_proportional.csv',
+                        f'test_safe_0.0_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed12_40seeds_2000samples_proportional.csv',
+                        f'test_safe_0.0_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed68_40seeds_2000samples_proportional.csv',
+                        f'test_safe_0.002_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed99_40seeds_1000samples_proportional.csv',
+                        f'test_safe_0.002_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed77_40seeds_1000samples_proportional.csv',
+                        f'test_safe_0.001_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed33_40seeds_1000samples_proportional.csv',
+                        #f'vac_results_SanFrancisco_0.02_20_randomseed45_40seeds_1000samples_proportional.csv',
+                        ]
 vac_result_path_combined = os.path.join(args.gt_root, args.msa_name, f'vac_results_{args.msa_name}_0.01_{args.NN}_40seeds_combined')
 if(os.path.exists(vac_result_path_combined)):
     print('Continue, and vac_result_combined file exists. Wanna recombine?')
@@ -151,6 +163,7 @@ print('total_cases, min:', graph_labels[:,0].min())
 print('total_cases, max-min:',graph_labels[:,0].max()-graph_labels[:,0].min())
 print('total_cases, mean:',graph_labels[:,0].mean())
 print('total_cases, std:',graph_labels[:,0].std())
+pdb.set_trace()
 
 # Calculate node centrality
 start = time.time(); print('Start graph construction..')
@@ -254,6 +267,7 @@ else:
 
 
 # Model and optimizer
+# Network structure
 config = Config()
 config.NN = args.NN #20220131
 config.dim_touched = dim_touched # Num of feats used to calculate embedding #20220127
@@ -265,7 +279,6 @@ config.gcn_nclass = 32 #50 #8 #16 #100#200 #20220119 #8(20220114)
 '''
 config.gcn_nclass = config.gcn_nhid #20220201
 config.gcn_dropout = args.dropout
-
 
 config.linear_nin = config.gcn_nclass-1 + (node_feats.shape[2]-config.dim_touched) #初代版本
 #config.linear_nin = (config.gcn_nclass-1 + (node_feats.shape[2]-config.dim_touched)) * config.NN
@@ -279,6 +292,8 @@ config.linear_nhid1 = 32 #64 #100 #8
 config.linear_nhid2 = 32 #64 #100
 config.linear_nout = 1
 
+
+
 def train(loader,min_val_loss,max_val_corr):
     train_loss = 0.0
     model.train()
@@ -286,7 +301,6 @@ def train(loader,min_val_loss,max_val_corr):
         optimizer.zero_grad()
         output = model(batch_x, adj) #20220121
         loss = F.mse_loss(output.squeeze(), batch_y)
-        #loss = F.smooth_l1_loss(output.squeeze(), batch_y, beta=1000) #20220202
         loss.backward() #original
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.1, norm_type=2) #20220122 #gradient clipping
         optimizer.step()
@@ -304,7 +318,6 @@ def train(loader,min_val_loss,max_val_corr):
         for (batch_x, batch_y) in val_loader:
             output = model(batch_x, adj) #20220121
             loss= F.mse_loss(output.squeeze(), batch_y)
-            #loss= F.smooth_l1_loss(output.squeeze(), batch_y, beta=500) #20220202
             val_loss += loss.item()
             output_val_list = output_val_list + output.squeeze().tolist()
             truth_val_list = truth_val_list + batch_y.squeeze().tolist()
@@ -315,10 +328,12 @@ def train(loader,min_val_loss,max_val_corr):
         if min_val_loss > val_loss:
             print(f'Validation Loss Decreased({min_val_loss:.6f}--->{val_loss:.6f}) \t Saving The Model')
             min_val_loss = val_loss
+            save_checkpoint_state(model.state_dict(), epoch, optimizer.state_dict(), scheduler.state_dict(), checkpoint_minloss_save_path); print('minloss checkpoint renewed.')
         if max_val_corr < val_corr:
             print(f'Validation Spearman Correlation Increased({max_val_corr:.6f}--->{val_corr:.6f}) \t Saving The Model')
             max_val_corr = val_corr
-            torch.save(model.state_dict(), checkpoint_maxcorr_save_path);print('maxcorr checkpoint renewed.')
+            save_checkpoint_state(model.state_dict(), epoch, optimizer.state_dict(), scheduler.state_dict(), checkpoint_maxcorr_save_path); print('maxcorr checkpoint renewed.')
+            #torch.save(model.state_dict(), checkpoint_maxcorr_save_path)
         # 若满足 early stopping 要求 #20220201
         if early_stopping.early_stop:
             print("Early stopping")
@@ -338,7 +353,6 @@ def test(loader,verbose=True):
         output = model(batch_x, adj) #20220121
         #loss = F.mse_loss(output.reshape(-1), batch_y) #20220120
         loss= F.mse_loss(output.squeeze(), batch_y) #20220121
-        #loss= F.smooth_l1_loss(output.squeeze(), batch_y, beta=500) #20220202
         test_loss += loss.item()
         output_test_list = output_test_list + output.squeeze().tolist()
         truth_test_list = truth_test_list + batch_y.squeeze().tolist()
@@ -359,17 +373,20 @@ if(not args.kfold): # 初代版本, no k-fold
     # Get model
     model = get_model(config, 'GNN_OVER_MLP')
     print(model)
-    if args.cuda:
-        model.cuda()
+    if args.cuda: model.cuda()
 
     # Optimization tools
     optimizer = optim.Adam(model.parameters(),
                         lr=args.lr, weight_decay=args.weight_decay)
-    #scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=70, gamma=0.1) #20220122
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer,'max',factor=0.5, patience=8, min_lr=1e-8, verbose=True) #20220122
     # 初始化 early_stopping 对象 #20220201
     patience = 30 #40 #20	# 当验证集损失在连续20次训练周期中都没有得到降低时，停止模型训练，以防止模型过拟合
     early_stopping = EarlyStopping(patience, verbose=False, path=checkpoint_minloss_save_path)	
+
+    if(args.resume): #断点续训 #20220203
+        model,preformed_epochs,optimizer,scheduler = get_checkpoint_state(checkpoint_maxcorr_save_path,model,optimizer,scheduler)
+    else:
+        preformed_epochs = 0
 
     # Train model 
     t_total = time.time()
@@ -377,12 +394,13 @@ if(not args.kfold): # 初代版本, no k-fold
     max_val_corr = 0 #20220201
     train_loss_record = []
     val_loss_record = []
-    for epoch in range(args.epochs):
+    for epoch in range(preformed_epochs,preformed_epochs+args.epochs): #20220203 #for epoch in range(args.epochs)
         print(f'\nEpoch{epoch+1}')
         result = train(train_loader,min_val_loss,max_val_corr)
         if(result==False): 
             # load the last checkpoint with the best model
             model.load_state_dict(torch.load(checkpoint_minloss_save_path))
+            #model.load_state_dict(torch.load(checkpoint_maxcorr_save_path))
             break
         else:
             train_loss, val_loss, val_corr, min_val_loss, max_val_corr = result

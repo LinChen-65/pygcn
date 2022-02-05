@@ -1,7 +1,5 @@
 import numpy as np
 import time
-import pickle
-from scipy import sparse
 import pdb
 
 class Model:
@@ -88,7 +86,7 @@ class Model:
         self.VACCINE_ACCEPTANCE = vaccine_acceptance #20211007
         #numpy.clip(a, a_min, a_max, out=None, **kwargs)
         self.VACCINATION_VECTOR = np.clip(self.VACCINATION_VECTOR, None, (self.CBG_SIZES*self.VACCINE_ACCEPTANCE))
-        print('Toal num of vaccines: ', vaccination_vector.sum())
+        #print('Total num of vaccines: ', vaccination_vector.sum())
         #print('Considering vaccine acceptance, actual num of vaccines: ', self.VACCINATION_VECTOR.sum())
         self.PROTECTION_RATE = protection_rate
         self.just_compute_r0 = just_compute_r0
@@ -177,8 +175,6 @@ class Model:
                     print('t:',t,'L:',L,'I:',I,'R',R,'C',C,'D',D)
             
             if(epidemic_over == False):
-                
-                #
                 assert((self.cbg_latent>=0).all())
                 assert((self.cbg_infected>=0).all())
                 assert((self.cbg_removed>=0).all())
@@ -188,7 +184,6 @@ class Model:
                 assert((self.deaths_to_happen>=0).all())
                 assert((self.new_deaths>=0).all())
                 
-                #
                 self.update_states(t)
                 C1 = np.sum(self.new_confirmed_cases,axis=1)
                 self.C2=self.C2+self.new_confirmed_cases
@@ -219,23 +214,6 @@ class Model:
             print('Final state after %d rounds: L+I+R=%s' % (t, self.format_floats(cbg_all_affected)))
         total_affected = np.sum(cbg_all_affected, axis=1)
         #print(f'Average number of people infected across random seeds: {np.mean(total_affected):.3f}')
-        
-        if self.just_compute_r0:
-            assert self.cbg_latent.sum() == 0
-            assert self.cbg_infected.sum() == 0
-
-            initial_cases = self.P0.sum(axis=1)
-            self.estimated_R0 = {'R0':1.*(total - initial_cases) / initial_cases}
-            assert self.estimated_R0['R0'].shape  == total.shape == initial_cases.shape
-            print("Mean initial cases across seeds: %2.3f; new cases from initial: %2.3f; estimated R0: %2.3f" %
-                (initial_cases.mean(), (total - initial_cases).mean(), self.estimated_R0['R0'].mean()))
-
-            total_base = self.history['all']['new_cases_from_base'].sum(axis=1)
-            total_poi = self.history['all']['new_cases_from_poi'].sum(axis=1)
-            assert total_base.shape == total_poi.shape == initial_cases.shape
-            self.estimated_R0['R0_base'] = 1.*total_base / initial_cases
-            self.estimated_R0['R0_POI'] = 1.*total_poi / initial_cases
-            assert np.allclose(self.estimated_R0['R0_base'] + self.estimated_R0['R0_POI'], self.estimated_R0['R0'])
         
         end_time = time.time()
         #print('Simulation time = %.3fs -> %.3fs per iteration' %
@@ -304,7 +282,6 @@ class Model:
         #assert (sus_frac <= 1).all()
 
         if self.PSI > 0:
-            #pdb.set_trace()
             # Our model: can only be infected by people in your home CBG.
             #cbg_base_infection_rates = self.HOME_BETA * cbg_densities  # S x N，得到λtcbg
             if t<self.VACCINATION_TIME:
@@ -324,6 +301,7 @@ class Model:
             poi_cbg_visits = self.POI_CBG_VISITS_LIST[t]  # M x N导入lpf
             poi_visits = poi_cbg_visits @ np.ones(poi_cbg_visits.shape[1]) #@表示做内积，得到的是每个poi的所有cbg的访问数之和。Vpjt
             #print('Any non-zero?',((poi_cbg_visits.toarray())!=0).any()) # 20210222
+        
         if not self.just_compute_r0:#凑数用的，并非这个意思
           # use network data
             self.num_active_pois = np.sum(poi_visits > 0)#访问人数大于0的poi数量
@@ -346,7 +324,7 @@ class Model:
             num_cases_from_poi = np.random.poisson(cbg_mean_new_cases_from_poi)
             #print('Any new cases from poi?',(num_cases_from_poi!=0).any()) # 20210222
             self.num_cbgs_active_at_pois = np.sum(cbg_mean_new_cases_from_poi > 0)
-
+        
         if self.debug:
             print(f'using poisson approx: expected new cases = {np.sum(cbg_mean_new_cases)}')
         self.num_cbgs_with_clipped_poi_cases = np.sum(num_cases_from_poi > num_sus)

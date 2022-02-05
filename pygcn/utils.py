@@ -453,4 +453,24 @@ def data_loader(node_feats, graph_labels, idx_train, idx_val, idx_test, batch_si
         return train_loader, val_loader, test_loader 
 
 
+def save_checkpoint_state(model_state_dict, epoch, optimizer_state_dict, scheduler_state_dict, savepath): #20220203
+    checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': model_state_dict,
+            'optimizer_state_dict': optimizer_state_dict,
+            'scheduler_state_dict': scheduler_state_dict,
+        }
+    torch.save(checkpoint,savepath)
 
+def get_checkpoint_state(path,model,optimizer,scheduler): #20220203
+     # 恢复上次的训练状态
+    print("Resume from checkpoint...")
+    checkpoint = torch.load(path)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    epoch=checkpoint['epoch']
+
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+
+    print('sucessfully recover from the last state') #logger.info
+    return model,epoch,optimizer,scheduler

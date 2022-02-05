@@ -12,7 +12,6 @@ import pandas as pd
 import numpy as np
 import pickle
 import random
-from scipy import stats
 
 import constants
 import functions
@@ -368,7 +367,7 @@ result_df = result_df.append({'Vaccinated_Idxs':[],
                               'Total_Deaths':final_deaths_cbg_no_vaccination.sum(),
                               'Death_Rates_STD':death_rates_std_no_vaccination,
                             }, ignore_index=True)
-print(result_df)  
+#print(result_df)  
 
 ###############################################################################
 # Randomly choose NN CBGs for vaccine distribution
@@ -448,13 +447,9 @@ for group_idx in range(max_group_idx):
                                     'Death_Rates_STD':death_rates_std,
                                     },ignore_index=True)
         #print(result_df)  
-        #pdb.set_trace()
         result_df.to_csv(filename)
         
     
 end = time.time()
 print('Time: ',(end-start))
-
-
 print('File name: ', filename)
-

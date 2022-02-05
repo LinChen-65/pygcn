@@ -1,4 +1,4 @@
-# python policy-generator.py --msa_name SanFrancisco  --mob_data_root '/home/chenlin/COVID-19/Data' --rel_result True --epochs 100
+# python rl-policy-generator.py --msa_name SanFrancisco  --rel_result True --epochs 100
 
 import setproctitle
 setproctitle.setproctitle("gnn-simu-vac@chenlin")
@@ -15,11 +15,14 @@ from sklearn import preprocessing
 from models import get_model
 from config import *
 import torch
-import torch.nn.functional as F
+#import torch.nn.functional as F
 import torch.optim as optim
 import random
-#from torch.utils.data import DataLoader, random_split
 import datetime
+from torch.distributions import Categorical
+#from itertools import count
+#from torch.utils.data import sampler
+import multiprocessing
 
 import time
 import pdb
@@ -29,9 +32,10 @@ import constants
 import functions
 import disease_model
 
-
+print('new')
 # 限制显卡使用
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+#os.environ["CUDA_VISIBLE_DEVICES"] = "2" #"1"
+torch.cuda.set_device(0) #1 #nvidia-smi
 
 ############################################################################################
 # Training settings
@@ -56,8 +60,6 @@ parser.add_argument('--gt_root', default=os.path.abspath(os.path.join(os.pardir,
                     help='Path to ground truth .csv files.')
 parser.add_argument('--msa_name', 
                     help='MSA name.')
-parser.add_argument('--mob_data_root', default = '/data/chenlin/COVID-19/Data',
-                    help='Path to mobility data.')
 #20220118
 parser.add_argument('--normalize', default = True,
                     help='Whether normalize node features or not.')
@@ -65,7 +67,7 @@ parser.add_argument('--rel_result', default = False, action='store_true',
                     help='Whether retrieve results relative to no_vac.')
 #20220123
 parser.add_argument('--prefix', default= '/home', 
-                    help='Prefix of data root. /home for rl4, /data for dl3.')
+                    help='Prefix of data root. /home for rl4, /data for dl3, /data4 for dl2.')
 #20220127
 parser.add_argument('--trained_evaluator_folder', default= 'chenlin/pygcn/pygcn/trained_model', 
                     help='Folder to reload trained evaluator model.')
@@ -76,9 +78,14 @@ parser.add_argument('--vaccination_time', default=0, #31
                     help='Time to distribute vaccines.')  
 parser.add_argument('--NN', type=int,
                     help='Number of CBGs to receive vaccines.')
-#20220203
+# 20220203
 parser.add_argument('--quicktest', default= False, action='store_true',
                     help='If true, perform only 2 simulations in traditional_evaluate(); else 40.')
+# 20220204
+parser.add_argument('--epoch_width', default=1000, type=int, 
+                    help='Num of samples in an epoch.')
+parser.add_argument('--model_save_folder', default= 'chenlin/pygcn/pygcn/trained_model', 
+                    help='Folder to save trained model.')
 
 args = parser.parse_args()
 # Check important parameters
@@ -89,18 +96,24 @@ if args.cuda:
     torch.cuda.manual_seed(args.seed)
 print('args.rel_result: ', args.rel_result)
 print('args.quicktest: ', args.quicktest)
+print('args.epochs: ', args.epochs)
+print('args.epoch_width: ', args.epoch_width)
 
 #evaluator_path = os.path.join(args.prefix, args.trained_evaluator_folder, 'total_cases_20220126.pt')
 #evaluator_path = os.path.join(args.prefix, args.trained_evaluator_folder, 'total_cases_of_250epochs_20220131.pt')
 evaluator_path = os.path.join(args.prefix, args.trained_evaluator_folder, 'total_cases_of_100epochs_20220203.pt')
-
 print('evaluator_path: ', evaluator_path)
 
+today = str(datetime.date.today()).replace('-','') # yyyy-mm-dd -> yyyymmdd
+print('today: ', today)
+checkpoint_save_path = os.path.join(args.prefix, args.model_save_folder, f'checkpoint_generator_maxreward_{today}.pt')
+print('checkpoint_save_path: ', checkpoint_save_path)
 
 ###############################################################################
 # Load traditional simulator
 
-epic_data_root = '/data/chenlin/COVID-19/Data'
+epic_data_root = f'{args.prefix}/chenlin/COVID-19/Data'
+mob_data_root = f'{args.prefix}/chenlin/COVID-19/Data' #Path to mobility data.
 MIN_DATETIME = datetime.datetime(2020, 3, 1, 0)
 MAX_DATETIME = datetime.datetime(2020, 5, 2, 23)
 
@@ -111,7 +124,7 @@ EXECUTION_RATIO = 1
 MSA_NAME_FULL = constants.MSA_NAME_FULL_DICT[args.msa_name]
 
 # Random Seed
-if(args.quicktest): NUM_SEEDS = 2
+if(args.quicktest): NUM_SEEDS = 5 #2
 else: NUM_SEEDS = 40 
 print('NUM_SEEDS: ', NUM_SEEDS)
 STARTING_SEED = range(NUM_SEEDS)
@@ -208,32 +221,29 @@ def run_simulation(starting_seed, num_seeds, vaccination_vector, vaccine_accepta
     return history_C2, history_D2
 
 
-def traditional_evaluate(vac_flag, is_torch=False):
-    if(is_torch):
-        # Construct vaccination vector
-        vaccination_vector = torch.zeros(len(cbg_sizes))
-        vaccination_vector[torch.where(vac_flag.squeeze()!=0)[0]] = num_vaccines
-        pdb.set_trace()#没想好
-    else:
-        # Construct vaccination vector
-        vaccination_vector = np.zeros(len(cbg_sizes))
-        vaccination_vector[torch.where(vac_flag.squeeze()!=0)[0].cpu().numpy()] = num_vaccines
-        history_C2, history_D2 = run_simulation(starting_seed=STARTING_SEED, num_seeds=NUM_SEEDS, 
-                                                vaccination_vector=vaccination_vector,
-                                                vaccine_acceptance=vaccine_acceptance,
-                                                protection_rate = PROTECTION_RATE)
-        # Average history records across random seeds
-        cases_cbg, deaths_cbg,_,_ = functions.average_across_random_seeds(history_C2,history_D2, 
-                                                                        num_cbgs, idxs_msa_all, 
-                                                                        print_results=False,draw_results=False)
+def traditional_evaluate(vac_flag):
+    start = time.time()
+    # Construct vaccination vector
+    vaccination_vector = np.zeros(len(cbg_sizes))
+    vaccination_vector[torch.where(vac_flag.squeeze()!=0)[0].cpu().numpy()] = num_vaccines
+    history_C2, history_D2 = run_simulation(starting_seed=STARTING_SEED, num_seeds=NUM_SEEDS, 
+                                            vaccination_vector=vaccination_vector,
+                                            vaccine_acceptance=vaccine_acceptance,
+                                            protection_rate = PROTECTION_RATE)
+    # Average history records across random seeds
+    cases_cbg, deaths_cbg,_,_ = functions.average_across_random_seeds(history_C2,history_D2, 
+                                                                    num_cbgs, idxs_msa_all, 
+                                                                    print_results=False,draw_results=False)
 
-        final_cases_cbg = cases_cbg[-1,:]
-        final_cases = final_cases_cbg.sum()
-        case_rates = final_cases_cbg/cbg_sizes
-        case_rates_std = case_rates.std()
-        #final_deaths_cbg = deaths_cbg[-1,:] #20220118
-        #death_rates = final_deaths_cbg/cbg_sizes #20220118
-        #death_rates_std = death_rates.std() #20220118
+    final_cases_cbg = cases_cbg[-1,:]
+    final_cases = final_cases_cbg.sum()
+    case_rates = final_cases_cbg/cbg_sizes
+    case_rates_std = case_rates.std()
+    #final_deaths_cbg = deaths_cbg[-1,:] #20220118
+    #death_rates = final_deaths_cbg/cbg_sizes #20220118
+    #death_rates_std = death_rates.std() #20220118
+    end = time.time()
+    #print('Used time: ', end-start)
     return final_cases, case_rates_std
 
 
@@ -241,6 +251,44 @@ def reset_vac_flag(vac_flag, vac_idx_list): #20220203
     vac_flag = torch.zeros_like(vac_flag)
     vac_flag[vac_idx_list] = 1
     return vac_flag
+
+
+def worker(vac_flag,t): # Used in multiprocess_traditional_evaluate() #20220204
+    """thread worker function"""
+    #print(f'worker {t}')
+    total_cases, case_rate_std = traditional_evaluate(vac_flag) 
+    return total_cases
+
+def multiprocess_traditional_evaluate(vac_flag_list): #20220204
+    pool = multiprocessing.Pool()   #processes=10 #processes=args.epoch_width
+    temp_list = []
+    total_cases_list = []
+    for t in range(args.epoch_width): 
+        vac_flag = vac_flag_list[t]
+        #total_cases_list.append(pool.apply_async(worker, (vac_flag,t,)).get())
+        temp_list.append(pool.apply_async(worker, (vac_flag,t,)))
+    pool.close()
+    pool.join()
+    for t in range(args.epoch_width): 
+        total_cases_list.append(temp_list[t].get())
+    return total_cases_list
+
+# Multiprocessing test
+'''
+vac_flag_list = []
+for i in range(10):
+    vac_flag = torch.zeros(2943,1)
+    vac_flag_list.append(vac_flag)
+
+pool = multiprocessing.Pool(processes=6)
+result = dict()
+for i in range(10):
+    vac_flag = vac_flag_list[i]
+    result[i] = (pool.apply_async(worker, (vac_flag,)).get())
+pool.close()
+pool.join()
+print('Done.')
+'''
 
 
 # Baseline:no_vaccination
@@ -268,6 +316,8 @@ print(final_cases_no_vaccination, case_rates_std_no_vaccination)
 ############################################################################################
 # Load trained PolicyEvaluator #20220127
 
+if hasattr(torch.cuda, 'empty_cache'):
+	torch.cuda.empty_cache()
 evaluator = torch.load(evaluator_path)
 print('evaluator: ', evaluator)
 evaluator.eval()
@@ -281,7 +331,7 @@ pretrain_embed_path = os.path.join(args.prefix,'chenlin/code-dynalearn/scripts/f
 adj, node_feats = load_data(vac_result_path=None, #20220126
                             dataset=f'safegraph-',
                             msa_name=args.msa_name,
-                            mob_data_root=args.mob_data_root,
+                            mob_data_root=mob_data_root,
                             output_root=output_root,
                             pretrain_embed_path=pretrain_embed_path,
                             normalize=args.normalize,
@@ -323,12 +373,10 @@ clo_centrality = clo_centrality.reshape(-1,1)
 bet_centrality = bet_centrality.reshape(-1,1)
 mob_level = mob_level.reshape(-1,1)
 
-#test: random feat
-#random_feat = torch.randn(mob_level.shape) #20220203
-
+#random_feat = torch.randn(mob_level.shape) #20220203 #test: random feat
+#gen_node_feats = np.concatenate((node_feats[:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level,random_feat), axis=1) #20220203
 #gen_node_feats = np.concatenate((node_feats, deg_centrality, clo_centrality, bet_centrality, mob_level), axis=1)
 gen_node_feats = np.concatenate((node_feats[:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level), axis=1)
-#gen_node_feats = np.concatenate((node_feats[:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level,random_feat), axis=1) #20220203
 
 dim_touched = gen_node_feats.shape[1] #赋值给config.dim_touched #20220203
 print('node_feats.shape: ', node_feats.shape) 
@@ -355,15 +403,16 @@ config.linear_nhid2 = 32 #100
 config.linear_nout = 1 #20220126 
 config.NN = args.NN #20220201
 
-model = get_model(config, 'Generator')
+#model = get_model(config, 'Generator')
+model = get_model(config, 'SoftGenerator')
 print(model)
-
 
 optimizer = optim.Adam(model.parameters(),
                        lr=args.lr, weight_decay=args.weight_decay)
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer,'min',factor=0.5, patience=6, min_lr=1e-8, verbose=True) #20220122
 
 random.seed(42)
+eps = np.finfo(np.float32).eps.item() #202202013
 
 if args.cuda:
     model.cuda()
@@ -374,7 +423,204 @@ if args.cuda:
     clo_centrality = clo_centrality.cuda() 
     bet_centrality = bet_centrality.cuda() 
     mob_level = mob_level.cuda() 
+
+
+def select_action(policy): #20220203
+    '''
+    state = torch.from_numpy(state).float().unsqueeze(0)
+    probs = policy(state)
+    m = Categorical(probs)
+    action = m.sample()
+    policy.saved_log_probs.append(m.log_prob(action))
+    return action.item()
+    '''
     
+    cbg_scores = model(gen_node_feats, adj) #F.softmax(cbg_scores,dim=0).squeeze().tolist() 
+    cbg_sampler = Categorical(cbg_scores.squeeze())
+    count = 0
+    vac_idx_list = []
+    log_probs_list = []
+    
+    # Construct policy (action)
+    loop_i = 0
+    while(count<args.NN):
+        loop_i += 1
+        if(loop_i>args.NN+100000): print(loop_i);pdb.set_trace()
+        action = cbg_sampler.sample() #每次只采样1个点
+        log_probs = cbg_sampler.log_prob(action)
+        if(action.item() in vac_idx_list):
+            continue
+        vac_idx_list.append(action.item())
+        log_probs_list.append(log_probs)
+        count += 1
+    # Record probability
+    for i in range(len(log_probs_list)):
+        if(i==0): 
+            total_log_probs = log_probs_list[i]
+        else:
+            total_log_probs = total_log_probs + log_probs_list[i]
+    policy.saved_log_probs.append(total_log_probs)
+    
+    '''
+    cbg_sampler = sampler.WeightedRandomSampler(cbg_scores.squeeze(), args.NN, False)
+    vac_idx_list = [idx for idx in cbg_sampler]; #print(vac_idx_list)
+    #vac_flag = torch.zeros_like(cbg_scores)
+    #vac_flag = reset_vac_flag(vac_flag, vac_idx_list)
+    
+    #cum_prod = np.cumprod(cbg_sampler.weights[vac_idx_list].cpu().detach().numpy())[-1]
+    #policy.saved_log_probs.append(cum_prod) #近似放回抽样
+    cum_sum = np.cumsum(cbg_sampler.weights[vac_idx_list].cpu().detach().numpy())[-1]
+    policy.saved_log_probs.append(cum_sum) #近似放回抽样
+    '''
+    
+    vac_flag = torch.zeros_like(cbg_scores)
+    vac_flag = reset_vac_flag(vac_flag, vac_idx_list)
+    return vac_flag
+
+#max_avg_rewards = -np.inf
+def finish_episode(policy,i_episode,max_avg_rewards): #20220203
+    R = 0
+    policy_loss = []
+    rewards = []
+    for r in policy.rewards[::-1]:
+        #R = r + 0.99 * R #args.gamma =0.99 #original
+        #rewards.insert(0, R) #original
+        rewards.insert(0, r)
+
+    rewards = torch.tensor(rewards) #original
+    rewards = (rewards - rewards.mean()) / (rewards.std() + eps) #original
+    for log_prob, reward in zip(policy.saved_log_probs, rewards):
+        policy_loss.append(-log_prob * reward)
+    optimizer.zero_grad()
+    
+    for i in range(len(policy_loss)):
+        if(i==0): total_loss = policy_loss[i]
+        else: total_loss = total_loss + policy_loss[i]
+    total_loss.backward()
+    #policy_loss = torch.cat(policy_loss).sum() #original #报错: RuntimeError: zero-dimensional tensor (at position 0) cannot be concatenated
+    #print('policy_loss:', policy_loss)
+    #policy_loss.backward()
+    #avg_rewards = np.mean(np.array(policy.rewards[:])) #original
+    avg_rewards = 0
+    count = 0
+    for r in policy.rewards[::-1]:
+        avg_rewards += r.item()
+        count += 1
+    avg_rewards /= count
+    if((i_episode==0) or (avg_rewards>max_avg_rewards)): # Save checkpoint
+        max_avg_rewards = avg_rewards
+        torch.save({
+            'epoch': i_episode,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'avg_rewards': avg_rewards,
+            }, checkpoint_save_path)
+        print('Max average rewards updated. Checkpoint updated.')
+
+    del policy.rewards[:]
+    del policy.saved_log_probs[:]
+
+    optimizer.step()
+
+    #return avg_rewards
+    return avg_rewards,max_avg_rewards
+
+# No vac
+'''
+vac_flag = select_action(model)
+vac_flag = torch.zeros_like(vac_flag)
+total_cases, case_rate_std = traditional_evaluate(vac_flag) #20220204
+no_vac_baseline = total_cases
+print('no_vac_baseline； ', no_vac_baseline)
+'''
+
+# Multiprocessing to accelarate traditional simulator #20220204 
+no_vac_baseline = 7425 #NUM_SEEDS=40
+random_baseline = 7280 #NUM_SEEDS=40
+avg_rewards_list = []
+max_avg_rewards = 0
+for i_episode in range(args.epochs):
+    start = time.time()
+    vac_flag_list = []
+    for t in range(args.epoch_width):  
+        vac_flag = select_action(model)
+        #vac_flag_list.append(vac_flag) 
+        vac_flag_list.append(vac_flag.cpu()) 
+    total_cases_list = multiprocess_traditional_evaluate(vac_flag_list)
+    for t in range(args.epoch_width): 
+        #reward = no_vac_baseline - total_cases_list[t] #20220204
+        reward = random_baseline - total_cases_list[t] #20220204
+        model.rewards.append(reward)
+    avg_rewards, max_avg_rewards = finish_episode(model,i_episode,max_avg_rewards)
+    avg_rewards_list.append(avg_rewards)
+    '''
+    if((i_episode==0) or (avg_rewards>max_avg_rewards)): # Save checkpoint
+        max_avg_rewards = avg_rewards
+        torch.save({
+            'epoch': i_episode,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'avg_rewards': avg_rewards,
+            }, checkpoint_save_path)
+        print('Max average rewards updated. Checkpoint updated.')
+    '''
+
+    print(f'Episode {i_episode}: avg rewards={avg_rewards}.')
+    print(f'Episode uses time: {time.time()-start}')
+pdb.set_trace()
+
+# Single processing for gnn predictor
+'''
+no_vac_baseline = 7425
+random_baseline = 7280
+#for i_episode in count(1): #original
+for i_episode in range(args.epochs): #20220203
+    for t in range(args.epoch_width):  # Don't infinite loop while learning
+        vac_flag = select_action(model)
+        # Prepare inputs for PolicyEvaluator
+        eval_node_feats = torch.cat((node_feats[:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, node_feats[:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag), axis=1) #20220201
+        eval_node_feats = eval_node_feats.unsqueeze(axis=0)
+        if args.cuda: eval_node_feats = eval_node_feats.cuda()
+        #reward = -evaluator(eval_node_feats, adj)
+        total_cases, case_rate_std = traditional_evaluate(vac_flag) #20220204
+        #reward = no_vac_baseline - total_cases #20220204
+        reward = random_baseline - total_cases #20220204
+        model.rewards.append(reward)
+    avg_rewards = finish_episode(model)
+    print(f'Episode {i_episode}: avg rewards={avg_rewards}.')
+'''
+
+#vac_flag = select_action(model)
+cbg_scores = model(gen_node_feats, adj)
+sorted_indices = torch.argsort(cbg_scores,dim=0,descending=True) #20220128 # 返回从大到小的索引
+reverse = torch.reciprocal(cbg_scores.detach())
+zero = torch.zeros_like(cbg_scores.detach())
+topk_mask = torch.where(cbg_scores>cbg_scores[sorted_indices[args.NN]], reverse, zero)
+vac_flag = cbg_scores * topk_mask
+# Prepare inputs for PolicyEvaluator
+eval_node_feats = torch.cat((node_feats[:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, node_feats[:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag), axis=1) #20220201
+eval_node_feats = eval_node_feats.unsqueeze(axis=0)
+if args.cuda: eval_node_feats = eval_node_feats.cuda()
+reward = -evaluator(eval_node_feats, adj)
+print('reward: ', reward)
+pdb.set_trace()
+total_cases, case_rate_std = traditional_evaluate(vac_flag) #20220204
+print('Traditional evaluated: ', total_cases, case_rate_std)
+
+print('If proceed, change model to best checkpoint.')
+pdb.set_trace()
+# Load best model
+model.load_state_dict(torch.load(checkpoint_save_path)['model_state_dict'])
+cbg_scores = model(gen_node_feats, adj)
+sorted_indices = torch.argsort(cbg_scores,dim=0,descending=True) #20220128 # 返回从大到小的索引
+reverse = torch.reciprocal(cbg_scores.detach())
+zero = torch.zeros_like(cbg_scores.detach())
+topk_mask = torch.where(cbg_scores>cbg_scores[sorted_indices[args.NN]], reverse, zero)
+vac_flag = cbg_scores * topk_mask
+total_cases, case_rate_std = traditional_evaluate(vac_flag) #20220204
+print('Traditional evaluated: ', total_cases, case_rate_std)
+
+###########################################################################
 # Training
 #no_vac_cases = 7425
 traditional_evaluated_cases = []
