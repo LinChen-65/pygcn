@@ -1,5 +1,6 @@
 #from re import M
 #from this import s
+from random import random
 import numpy as np
 import scipy.sparse as sp
 import torch
@@ -12,6 +13,7 @@ import pdb
 from sklearn import preprocessing
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader, ConcatDataset
+from torch.distributions import Categorical
 
 sys.path.append(os.path.join(os.getcwd(), '../gt-generator'))
 import constants
@@ -472,5 +474,49 @@ def get_checkpoint_state(path,model,optimizer,scheduler): #20220203
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 
-    print('sucessfully recover from the last state') #logger.info
+    print('Sucessfully recover from the last state') #logger.info
     return model,epoch,optimizer,scheduler
+
+
+class ReplayBuffer: #20220206
+    def __init__(self, capacity):
+        self.replay_buffer = dict() #20220205
+        self.count = 0
+        self.capacity = capacity
+        self.min_reward = np.inf
+        self.min_reward_idx = 0
+
+    def store_transition(self, vac_flag, reward):
+        vac_idx_list = torch.nonzero(vac_flag.squeeze()).squeeze().tolist()
+        #self.replay_buffer.append(np.array([a, r])) #original
+        self.replay_buffer[self.count] = [vac_idx_list, reward] #20220205
+        if(reward<self.min_reward):
+            self.min_reward = reward
+            self.min_reward_idx = self.count
+        self.count += 1
+        # TODO: 补一个renew，只保存reward最高的
+        #if(self.count>self.capacity):
+        #    self.replay_buffer.pop(self.min_reward_idx)
+
+    #def get_actions(self):
+    #    return np.vstack(np.vstack(self.replay_buffer)[:, 0])
+    #def get_reward(self, i):
+    #    return np.vstack(self.replay_buffer)[i, 1]
+
+    def clear(self):
+        self.replay_buffer = []
+        self.count = 0
+
+    def get_action_and_reward(self): #20220205
+        random_idx = np.random.randint(0,self.count) # 采样一个序号
+        vac_idx_list = self.replay_buffer[random_idx][0]
+        reward = self.replay_buffer[random_idx][1]
+        return vac_idx_list, reward
+                
+    def get_log_prob(self, model, vac_idx_list, gen_node_feats, adj): #20220205
+        cbg_scores = model(gen_node_feats, adj) #F.softmax(cbg_scores,dim=0).squeeze().tolist() 
+        cbg_sampler = Categorical(cbg_scores.squeeze())
+        total_log_probs = 0
+        for action in vac_idx_list:
+            total_log_probs += cbg_sampler.log_prob(torch.tensor([action]).cuda()) #这个点的log prob
+        return total_log_probs

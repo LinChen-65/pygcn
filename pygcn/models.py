@@ -1,5 +1,3 @@
-#from multiprocessing import Pool
-#from turtle import forward
 import torch.nn as nn
 import torch.nn.functional as F
 #from pygcn.layers import GraphConvolution #original
@@ -9,8 +7,11 @@ from torch.nn import Parameter, Linear, Sequential, Module #20220112
 import torch 
 #from torch_geometric.nn import TopKPooling #20220127
 #import random #20220129
+from utils import ReplayBuffer
 
 import pdb
+
+
 
 
 class GCN(nn.Module):
@@ -175,7 +176,7 @@ class SoftGeneratorGCN(nn.Module):
         #return F.relu(x) #20220121 #when train, loss=nan, 调小lr可以缓解
         return x
 
-#######################################################################
+######################################################################
 class LinearLayers(nn.Module): #20220112
     def __init__(self, nin, nhid1, nhid2, nout=1, activation="relu", bias=True):
         nn.Module.__init__(self)
@@ -240,7 +241,7 @@ class GeneratorMLPLayers(nn.Module): #202201203
         return x
 
 
-class SoftGeneratorMLPLayers(nn.Module): #202201203
+class SoftGeneratorMLP(nn.Module): #202201203
     def __init__(self, nin, nhid1, nhid2, nout=1, activation='relu', bias=True):
         nn.Module.__init__(self)
         self.bias = bias
@@ -248,9 +249,7 @@ class SoftGeneratorMLPLayers(nn.Module): #202201203
         self.linear2 = Linear(nhid1, nhid2, bias=self.bias)
         self.linear3 = Linear(nhid2, nout, bias=self.bias)
 
-    def apply_bn(self, x): #20220122 #BatchNorm
-        ''' Batch normalization of 3D tensor x
-        '''
+    def apply_bn(self, x): #20220122 #Batch normalization of 3D tensor x
         bn_module = nn.BatchNorm1d(x.size()[1]).cuda()
         return bn_module(x)
 
@@ -261,7 +260,6 @@ class SoftGeneratorMLPLayers(nn.Module): #202201203
         #x = F.relu(self.linear2(x))
         
         #x = self.linear3(x)
-        #pdb.set_trace()
         x = F.softmax(self.linear3(x),dim=0)
         return x
 
@@ -288,6 +286,51 @@ class PoolLayer(nn.Module): #20220120
         return output
 
 
+class SoftGeneratorPoolMLP(nn.Module): #20220206
+    def __init__(self,nin, nhid1, nhid2, nout=1, bias=True):
+        nn.Module.__init__(self)
+        self.bias = bias
+        self.linear1 = Linear(nin, nhid1, bias=self.bias)
+        self.linear2 = Linear(nhid1, nhid2, bias=self.bias)
+        #self.linear3 = Linear(nhid2, nout, bias=self.bias)
+        self.linear3 = Linear(nhid2, nin, bias=self.bias)
+
+    '''
+    def apply_bn(self, x): # Batch normalization of 3D tensor x
+        bn_module = nn.BatchNorm1d(x.size()).cuda()
+        return bn_module(x)
+    '''
+    def forward(self, x): #对所有cbg的embedding取一个mean，过mlp，激活，得到key vector
+        x = torch.mean(x,dim=0).unsqueeze(0)
+        #x = self.apply_bn(F.relu(self.linear1(x)))
+        #x = self.apply_bn(F.relu(self.linear2(x)))
+        x = F.relu(self.linear1(x))
+        x = F.relu(self.linear2(x))
+        #x = F.softmax(self.linear3(x),dim=0) #
+        x = self.linear3(x)
+        
+        return x # key vector
+
+
+#######################################################################
+class SoftGeneratorAttention(nn.Module): #20220206
+    def __init__(self):
+        nn.Module.__init__(self)
+
+    def apply_bn(self, x): #20220122 #BatchNorm
+        ''' Batch normalization of 3D tensor x
+        '''
+        bn_module = nn.BatchNorm1d(x.size()[1]).cuda()
+        return bn_module(x)
+
+    def forward(self, key, x):
+        #pdb.set_trace()
+        attn = torch.mul(key,x).sum(dim=1) #torch.mul(key,x).sum(dim=1)[0]等同于torch.dot(key.squeeze(),x[0,:])
+        #attn = F.softmax(attn) #只有一个1
+        attn = (attn - attn.min()) / (attn.max()-attn.min()) #minmax scaling
+        return attn
+
+    
 #######################################################################
 class GCN_OVER_MLP(nn.Module): #20220121
     def __init__(self, config):
@@ -303,7 +346,6 @@ class GCN_OVER_MLP(nn.Module): #20220121
             #this_output = self.GCNLayer.forward(x[i,:,:-1], adj) #最后一维标记是否免疫，不要动
             this_output = self.GCNLayer.forward(x[i,:,:self.dim_touched], adj) #20220123
             if(i==0):
-                #all_gcn_output = this_output.clone()
                 all_gcn_output = this_output.clone().unsqueeze(dim=0) #20220127
             else:
                 all_gcn_output = torch.cat((all_gcn_output,this_output.unsqueeze(dim=0)), dim=0)
@@ -337,51 +379,6 @@ class Generator(nn.Module): #20220126
         vac_flag = mlp_output * topk_mask
 
         return vac_flag
-
-'''
-class Hierarchical_Generator_Depracated(nn.Module): #20220129
-    def __init__(self, config):
-        nn.Module.__init__(self)
-        self.GCNLayer_1 = GeneratorGCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout)
-        self.MLPLayers_1 = MLPLayers(config.linear_nin, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_activation, config.linear_bias)
-        self.GCNLayer_2 = GeneratorGCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout)
-        self.MLPLayers_2 = MLPLayers(config.linear_nin, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_activation, config.linear_bias)
-        self.dim_touched = config.dim_touched
-
-    def forward(self, x, adj):
-        
-        group_idx_list = sorted(set(x[:,-2].cpu().numpy())) #最后一维用来当vac_flag，倒数第二维是所属的group
-        num_groups = len(group_idx_list)
-        num_samples_per_group = 5 #test
-        # Random sampling for each group
-        group_feats =  torch.zeros(num_groups, num_samples_per_group, self.NN, x.shape[1]) #(22,5,70,18)
-        group_count = 0
-        pdb.set_trace()
-        for group_idx in group_idx_list:
-            sampled_feats = torch.zeros(num_samples_per_group, self.NN, x.shape[1]); #print('sampled_feats.shape: ', sampled_feats.shape)
-            nodes = list(torch.where(x[:,-1]==group_idx)[0].cpu().numpy())
-            for sample_idx in range(num_samples_per_group):
-                sampled_nodes = random.sample(nodes, self.NN) # 从每个组采样self.NN个节点  
-                #sampled_feats[sample_idx] = torch.mean(x[sampled_nodes], dim=0) # 特征取平均
-                sampled_feats[sample_idx] = x[sampled_nodes]
-            #sampled_feats = torch.mean(sampled_feats, dim=0) # 用5个样本特征均值的均值代表该组特征
-            
-            group_feats[group_count] = sampled_feats
-            group_count += 1
-
-        pdb.set_trace()
-        gcn_output_1 = self.GCNLayer_1.forward(x[:,:self.dim_touched], adj) 
-        gcn_output_1 = torch.cat((gcn_output_1, x[:,self.dim_touched:]), dim=1) #20220123
-        mlp_output_1 = self.MLPLayers_1.forward(gcn_output_1) 
-        
-        sorted_indices = torch.argsort(mlp_output_1,dim=0,descending=True) #20220128 # 返回从大到小的索引
-        one = torch.ones_like(mlp_output_1)
-        zero = torch.zeros_like(mlp_output_1)
-        topk_mask = torch.where(mlp_output_1>mlp_output_1[sorted_indices[0]], one, zero)
-        vac_flag = mlp_output_1 * topk_mask
-
-        return vac_flag
-'''
 
 
 class Hierarchical_Generator(nn.Module): #20220129
@@ -417,30 +414,28 @@ class Hierarchical_Generator(nn.Module): #20220129
 class SoftGenerator(nn.Module): #20220203
     def __init__(self, config):
         nn.Module.__init__(self)
-        self.GCNLayer = SoftGeneratorGCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout,config.NN)
-        self.MLPLayers = SoftGeneratorMLPLayers(config.linear_nin, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_activation, config.linear_bias)
+        self.GCN = SoftGeneratorGCN(config.gcn_nfeat, config.gcn_nhid, config.gcn_nclass, config.gcn_dropout,config.NN)
+        #self.MLP = SoftGeneratorMLP(config.linear_nin, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_activation, config.linear_bias)
+        self.PoolMLP = SoftGeneratorPoolMLP(32, config.linear_nhid1, config.linear_nhid2, config.linear_nout, config.linear_bias)
+        self.Attention = SoftGeneratorAttention()
+
         self.dim_touched = config.dim_touched
         self.NN = config.NN #20220201
         self.saved_log_probs = [] #20220203
         self.rewards = [] #20220203
+        self.replay_buffer = ReplayBuffer(config.replay_buffer_capacity) #20220205
 
         
     def forward(self, x, adj):
-        all_gcn_output = self.GCNLayer.forward(x[:,:self.dim_touched], adj) 
-        all_gcn_output = torch.cat((all_gcn_output, x[:,self.dim_touched:]), dim=1) #20220123
-        mlp_output = self.MLPLayers.forward(all_gcn_output) 
-        '''
-        print(mlp_output.max().item(), mlp_output.min().item(), mlp_output.mean().item(), mlp_output.std().item())
+        all_gcn_output = self.GCN.forward(x[:,:self.dim_touched], adj) 
+        #all_gcn_output = torch.cat((all_gcn_output, x[:,self.dim_touched:]), dim=1) #20220123 #20220206注释
+        key = self.PoolMLP(all_gcn_output) #20220206
+        attn = self.Attention(key, all_gcn_output)
+        #pdb.set_trace()
+        return attn
 
-        sorted_indices = torch.argsort(mlp_output,dim=0,descending=True) #20220128 # 返回从大到小的索引
-        reverse = torch.reciprocal(mlp_output.detach())
-        zero = torch.zeros_like(mlp_output.detach())
-        topk_mask = torch.where(mlp_output>mlp_output[sorted_indices[self.NN]], reverse, zero)
-        vac_flag = mlp_output * topk_mask
-
-        return vac_flag
-        '''
-        return mlp_output
+        #mlp_output = self.MLP.forward(all_gcn_output) 
+        #return mlp_output
 
 
 #######################################################################

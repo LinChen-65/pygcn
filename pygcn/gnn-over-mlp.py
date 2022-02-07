@@ -116,7 +116,13 @@ vac_result_path_list = [f'safe_0.01_crossgroup_vac_results_{args.msa_name}_0.01_
                         f'test_safe_0.002_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed99_40seeds_1000samples_proportional.csv',
                         f'test_safe_0.002_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed77_40seeds_1000samples_proportional.csv',
                         f'test_safe_0.001_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed33_40seeds_1000samples_proportional.csv',
-                        #f'vac_results_SanFrancisco_0.02_20_randomseed45_40seeds_1000samples_proportional.csv',
+                        f'vac_results_SanFrancisco_0.02_20_randomseed45_40seeds_1000samples_proportional.csv',
+                        f'safe_0.0_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed68_40seeds_2000samples_proportional.csv',
+                        f'safe_0.0_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed12_40seeds_2000samples_proportional.csv',
+                        f'safe_0.005_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed65_40seeds_1000samples_proportional.csv',
+                        f'safe_0.001_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed33_40seeds_1000samples_proportional.csv',
+                        f'safe_0.002_crossgroup_vac_results_{args.msa_name}_0.01_{args.NN}_randomseed99_40seeds_1000samples_proportional.csv',
+                        f'safe_0.002_crossgroup_vac_results_SanFrancisco_0.01_20_randomseed77_40seeds_1000samples_proportional.csv',
                         ]
 vac_result_path_combined = os.path.join(args.gt_root, args.msa_name, f'vac_results_{args.msa_name}_0.01_{args.NN}_40seeds_combined')
 if(os.path.exists(vac_result_path_combined)):
@@ -338,7 +344,7 @@ def train(loader,min_val_loss,max_val_corr):
         if early_stopping.early_stop:
             print("Early stopping")
             # 结束模型训练
-            return False
+            #return False #20220206 暂时不stop
 
         return train_loss, val_loss, val_corr, min_val_loss, max_val_corr
     
@@ -385,13 +391,15 @@ if(not args.kfold): # 初代版本, no k-fold
 
     if(args.resume): #断点续训 #20220203
         model,preformed_epochs,optimizer,scheduler = get_checkpoint_state(checkpoint_maxcorr_save_path,model,optimizer,scheduler)
+        #model,preformed_epochs,optimizer,scheduler = get_checkpoint_state(checkpoint_minloss_save_path,model,optimizer,scheduler)
+        pdb.set_trace()
     else:
         preformed_epochs = 0
 
     # Train model 
     t_total = time.time()
-    min_val_loss = np.inf
-    max_val_corr = 0 #20220201
+    min_val_loss = np.inf; min_val_loss_epoch = 0
+    max_val_corr = 0;  max_val_corr_epoch = 0
     train_loss_record = []
     val_loss_record = []
     for epoch in range(preformed_epochs,preformed_epochs+args.epochs): #20220203 #for epoch in range(args.epochs)
@@ -399,11 +407,18 @@ if(not args.kfold): # 初代版本, no k-fold
         result = train(train_loader,min_val_loss,max_val_corr)
         if(result==False): 
             # load the last checkpoint with the best model
-            model.load_state_dict(torch.load(checkpoint_minloss_save_path))
-            #model.load_state_dict(torch.load(checkpoint_maxcorr_save_path))
+            #model.load_state_dict(torch.load(checkpoint_minloss_save_path))
+            #model,epoch,optimizer,scheduler = get_checkpoint_state(checkpoint_minloss_save_path,model,optimizer,scheduler)
+            model,epoch,optimizer,scheduler = get_checkpoint_state(checkpoint_maxcorr_save_path,model,optimizer,scheduler)
             break
         else:
-            train_loss, val_loss, val_corr, min_val_loss, max_val_corr = result
+            train_loss, val_loss, val_corr, new_min_val_loss, new_max_val_corr = result
+            if(new_min_val_loss<min_val_loss):
+                min_val_loss = new_min_val_loss
+                min_val_loss_epoch = epoch
+            if(new_max_val_corr>max_val_corr):
+                max_val_corr = new_max_val_corr
+                max_val_corr_epoch = epoch
             train_loss_record.append(train_loss)
             val_loss_record.append(val_loss)
             print(f'Training Loss: {train_loss} \t\t Validation Loss: {val_loss}')
@@ -412,8 +427,9 @@ if(not args.kfold): # 初代版本, no k-fold
 
     print("Optimization Finished!")
     print("Total time elapsed: {:.4f}s".format(time.time() - t_total))
-    print('train_loss_record: ',train_loss_record)
-    print('val_loss_record: ',val_loss_record)
+    #print('train_loss_record: ',train_loss_record)
+    #print('val_loss_record: ',val_loss_record)
+    print(f'max_val_corr: {max_val_corr}, epoch: {max_val_corr_epoch};\nmin_val_loss: {min_val_loss}, epoch: {min_val_loss_epoch}.')
 
 else: # k-Fold validation #20220202
     pdb.set_trace()
