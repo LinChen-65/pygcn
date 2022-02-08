@@ -317,17 +317,15 @@ class SoftGeneratorAttention(nn.Module): #20220206
     def __init__(self):
         nn.Module.__init__(self)
 
-    def apply_bn(self, x): #20220122 #BatchNorm
-        ''' Batch normalization of 3D tensor x
-        '''
+    def apply_bn(self, x): #Batch normalization of 3D tensor x
         bn_module = nn.BatchNorm1d(x.size()[1]).cuda()
         return bn_module(x)
 
     def forward(self, key, x):
         #pdb.set_trace()
         attn = torch.mul(key,x).sum(dim=1) #torch.mul(key,x).sum(dim=1)[0]等同于torch.dot(key.squeeze(),x[0,:])
-        #attn = F.softmax(attn) #只有一个1
-        attn = (attn - attn.min()) / (attn.max()-attn.min()) #minmax scaling
+        attn = F.softmax(attn) #只有一个1
+        #attn = (attn - attn.min()) / (attn.max()-attn.min()) #minmax scaling
         return attn
 
     

@@ -29,7 +29,7 @@ import constants
 import functions
 import disease_model
 
-print('1234')
+print('1034')
 # 限制显卡使用
 #os.environ["CUDA_VISIBLE_DEVICES"] = "2" #"1"
 torch.cuda.set_device(0) #1 #nvidia-smi
@@ -122,11 +122,14 @@ print('simulation_cache_save_path: ', simulation_cache_save_path)
 # Load simulation cache to accelarate training #20220205
 
 cache_dict = multiprocessing.Manager().dict()
-'''
+
 dict_path_list = ['simulation_cache.pkl', 
                   'simulation_cache_1.pkl', 
-                  'simulation_cache_2_202202061756.pkl',
-                  'simulation_cache_2.pkl'] #20220206
+                  'simulation_cache_2.pkl',
+                  'simulation_cache_3.pkl',
+                  'simulation_cache_202202061756.pkl',
+                  'simulation_cache_202202070130.pkl',
+                  'simulation_cache_202202070454.pkl'] #20220206
 combined_dict = dict()
 for dict_path in dict_path_list:
     if(os.path.exists(dict_path)):
@@ -136,15 +139,15 @@ for dict_path in dict_path_list:
         print(f'len(new_dict): {len(new_dict)}')
         print(f'len(combined_dict): {len(combined_dict)}')
 cache_dict = combined_dict
-'''
 
+'''
 dict_exists = False
 if(os.path.exists(simulation_cache_save_path)):
     with open(simulation_cache_save_path, 'rb') as f:
         saved_dict = pickle.load(f)
     dict_exists = True
 if(dict_exists): cache_dict = saved_dict
-
+'''
 print('Num of cached results: ', len(cache_dict))
 
 ###############################################################################
@@ -341,6 +344,15 @@ def select_action(model): #20220203
     vac_idx_list = []
     log_probs_list = []
     
+    # Construct policy #20220207
+    #pdb.set_trace()
+    vac_idx_list = torch.multinomial(cbg_scores.squeeze(), args.NN, replacement=False).tolist()
+    total_log_probs = 0
+    for action in vac_idx_list:
+        total_log_probs = total_log_probs + cbg_sampler.log_prob(torch.tensor([action]).cuda())
+    model.saved_log_probs.append(total_log_probs)
+
+    '''
     # Construct policy (action)
     loop_i = 0
     while(count<args.NN):
@@ -357,6 +369,7 @@ def select_action(model): #20220203
         if(i==0): total_log_probs = log_probs_list[i]
         else: total_log_probs = total_log_probs + log_probs_list[i]
     model.saved_log_probs.append(total_log_probs)
+    '''
     
     '''
     cbg_sampler = sampler.WeightedRandomSampler(cbg_scores.squeeze(), args.NN, False)
@@ -599,7 +612,10 @@ for i_episode in range(args.epochs):
     if(i_episode%10==0): print(f'Episode uses time: {time.time()-start}')
 # Save final episode model
 if(args.save_checkpoint):
-    torch.save({'epoch': i_episode,'model_state_dict': model.state_dict(),'optimizer_state_dict': optimizer.state_dict(),'avg_rewards': avg_rewards,}, os.path.join(args.prefix, args.model_save_folder, f'checkpoint_generator_maxreward_episode{args.epochs}_{today}.pt'))
+    torch.save({'epoch': i_episode,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'avg_rewards': avg_rewards,}, os.path.join(args.prefix, args.model_save_folder, f'checkpoint_generator_maxreward_episode{args.epochs}_{today}.pt'))
 
 pdb.set_trace()
 
@@ -630,7 +646,9 @@ zero = torch.zeros_like(cbg_scores.detach())
 topk_mask = torch.where(cbg_scores>cbg_scores[sorted_indices[args.NN]], reverse, zero)
 vac_flag = cbg_scores * topk_mask
 # Prepare inputs for PolicyEvaluator
-eval_node_feats = torch.cat((node_feats[:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, node_feats[:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, vac_flag), axis=1) #20220201
+eval_node_feats = torch.cat((node_feats[:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, 
+                             node_feats[:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, 
+                             vac_flag.unsqueeze(1)), axis=1) #20220206
 eval_node_feats = eval_node_feats.unsqueeze(axis=0)
 if args.cuda: eval_node_feats = eval_node_feats.cuda()
 reward = -evaluator(eval_node_feats, adj)
