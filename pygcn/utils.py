@@ -452,8 +452,8 @@ def data_loader(node_feats, graph_labels, idx_train, idx_val, idx_test, batch_si
             test_dataset,#test_dataset.dataset,
             batch_size=batch_size,
             shuffle=False) #shuffle=True)
-        return train_loader, val_loader, test_loader 
 
+        return train_loader, val_loader, test_loader
 
 def save_checkpoint_state(model_state_dict, epoch, optimizer_state_dict, scheduler_state_dict, savepath): #20220203
     checkpoint = {
