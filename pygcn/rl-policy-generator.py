@@ -29,7 +29,7 @@ import constants
 import functions
 import disease_model
 
-print('1034')
+
 # 限制显卡使用
 #os.environ["CUDA_VISIBLE_DEVICES"] = "2" #"1"
 torch.cuda.set_device(0) #1 #nvidia-smi
@@ -82,7 +82,7 @@ parser.add_argument('--epoch_width', default=1000, type=int,
 parser.add_argument('--model_save_folder', default= 'chenlin/pygcn/pygcn/trained_model', 
                     help='Folder to save trained model.')
 # 20220205
-parser.add_argument('--simulation_cache_filename', default='chenlin/pygcn/pygcn/simulation_cache_4.pkl',
+parser.add_argument('--simulation_cache_filename', default='chenlin/pygcn/pygcn/simulation_cache_temp.pkl',
                     help='File to save traditional_simulate results.')
 parser.add_argument('--replay_width', type=int, default=2,
                     help='Num of experienced actions to be replayed.')
@@ -119,17 +119,20 @@ checkpoint_save_path = os.path.join(args.prefix, args.model_save_folder, f'check
 print('checkpoint_save_path: ', checkpoint_save_path)
 simulation_cache_save_path = os.path.join(args.prefix, args.simulation_cache_filename)
 print('simulation_cache_save_path: ', simulation_cache_save_path)
+
+cache_dict = multiprocessing.Manager().dict() 
+
 # Load simulation cache to accelarate training #20220205
+dict_path_list = ['simulation_cache_combined.pkl', 
+                  'simulation_cache_temp.pkl'
+                  #'simulation_cache_1.pkl', 
+                  #'simulation_cache_2.pkl',
+                  #'simulation_cache_3.pkl',
+                  #'simulation_cache_202202061756.pkl',
+                  #'simulation_cache_202202070130.pkl',
+                  #'simulation_cache_202202070454.pkl'
+                  ] #20220206
 
-cache_dict = multiprocessing.Manager().dict()
-
-dict_path_list = ['simulation_cache.pkl', 
-                  'simulation_cache_1.pkl', 
-                  'simulation_cache_2.pkl',
-                  'simulation_cache_3.pkl',
-                  'simulation_cache_202202061756.pkl',
-                  'simulation_cache_202202070130.pkl',
-                  'simulation_cache_202202070454.pkl'] #20220206
 combined_dict = dict()
 for dict_path in dict_path_list:
     if(os.path.exists(dict_path)):
@@ -138,17 +141,11 @@ for dict_path in dict_path_list:
         combined_dict = {**combined_dict,**new_dict}
         print(f'len(new_dict): {len(new_dict)}')
         print(f'len(combined_dict): {len(combined_dict)}')
-cache_dict = combined_dict
 
-'''
-dict_exists = False
-if(os.path.exists(simulation_cache_save_path)):
-    with open(simulation_cache_save_path, 'rb') as f:
-        saved_dict = pickle.load(f)
-    dict_exists = True
-if(dict_exists): cache_dict = saved_dict
-'''
-print('Num of cached results: ', len(cache_dict))
+pdb.set_trace()
+with open(os.path.join(args.prefix, 'chenlin/pygcn/pygcn/simulation_cache_combined.pkl'), 'wb') as f:
+    pickle.dump(combined_dict, f)
+
 
 ###############################################################################
 # Load traditional simulator
@@ -292,48 +289,35 @@ def reset_vac_flag(vac_flag, vac_idx_list): #20220203
 
 def worker(vac_flag,cache_dict,mylock): # Used in multiprocess_traditional_evaluate() #20220204
     """thread worker function"""
-    #temp_vac_flag = vac_flag.squeeze().cpu().numpy()
-    #this_key = np.where(temp_vac_flag!=0)[0]
     this_key = tuple(vac_flag.squeeze().cpu().numpy())
     if(this_key in cache_dict):
-        print('Found in cache') 
+        print('Found in cache_dict') 
         [total_cases, case_rate_std] = cache_dict[this_key]
+    elif(this_key in combined_dict):
+        print('Found in combined_dict') 
+        [total_cases, case_rate_std] = combined_dict[this_key]
     else:
         print('Not found in cache') 
         total_cases, case_rate_std = traditional_evaluate(vac_flag) 
-        #mylock.acquire(); print('Aquired lock.')
-        print(len(list(cache_dict.keys())))
-        #mylock.release();print('Released lock.')
         cache_dict[this_key] = [total_cases, case_rate_std]
-        #temp_list = cache_dict[this_key]
-        #temp_list.append([total_cases, case_rate_std])
-        #temp_list.append([111,111])#test
-        #cache_dict[this_key] = temp_list
-        #print(len(list(cache_dict.keys())))
-        #print('Updated')
-        #mylock.release();print('Released lock.')
+        print(len(list(cache_dict.keys())))
     return total_cases
 
-def init_lock(mylock): #20220206
-    global lock
-    lock = mylock
+
 
 def multiprocess_traditional_evaluate(vac_flag_list,cache_dict): #20220204
-    #mylock = multiprocessing.Lock()
-    #pool = multiprocessing.Pool(initializer=init_lock, initargs=(mylock, ))   #processes=10 #processes=args.epoch_width
     mylock = multiprocessing.Manager().Lock()
-    #pool = multiprocessing.Pool(mylock) 
     pool = multiprocessing.Pool() 
     temp_list = []
     total_cases_list = []
     for t in range(args.epoch_width): 
         vac_flag = vac_flag_list[t]
-        #temp_list.append(pool.apply_async(worker, (vac_flag,cache_dict,)))
         temp_list.append(pool.apply_async(worker, (vac_flag,cache_dict,mylock)))
     pool.close()
     pool.join()
     for t in range(args.epoch_width): 
         total_cases_list.append(temp_list[t].get())
+
     return total_cases_list
 
 
@@ -345,7 +329,6 @@ def select_action(model): #20220203
     log_probs_list = []
     
     # Construct policy #20220207
-    #pdb.set_trace()
     vac_idx_list = torch.multinomial(cbg_scores.squeeze(), args.NN, replacement=False).tolist()
     total_log_probs = 0
     for action in vac_idx_list:
@@ -411,7 +394,6 @@ def finish_episode(model, max_avg_rewards): #20220203
 
     avg_rewards = 0
     count = 0
-    #pdb.set_trace() #20220206
     for r in model.rewards[::-1]:
         avg_rewards += r.item()
         count += 1
@@ -606,6 +588,10 @@ for i_episode in range(args.epochs):
     dict_to_store = dict()
     for i in range(len(key_list)):
         dict_to_store[key_list[i]] = value_list[i]
+    print(len(list(dict_to_store.keys())))
+    print(len(list(dict_to_store.keys()))+len(list(combined_dict.keys())))
+    #dict_to_store = {**combined_dict, **dict_to_store}
+    #print(len(list(dict_to_store.keys())))
     with open(simulation_cache_save_path, 'wb') as f:
         pickle.dump(dict_to_store, f)
     print('cache_dict updated.') #test loading: with open(simulation_cache_save_path, 'rb') as f:saved_dict = pickle.load(f)
