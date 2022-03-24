@@ -546,8 +546,9 @@ random_baseline = 7280 #NUM_SEEDS=40
 # Multiprocessing to accelarate traditional simulator #20220204
 avg_rewards_list = []
 max_avg_rewards = 0
+start = time.time()
 for i_episode in range(args.epochs):
-    start = time.time()
+    start_episode = time.time()
     vac_flag_list = []
     for t in range(args.epoch_width):  
         vac_flag = select_action(model)
@@ -590,12 +591,11 @@ for i_episode in range(args.epochs):
         dict_to_store[key_list[i]] = value_list[i]
     print(len(list(dict_to_store.keys())))
     print(len(list(dict_to_store.keys()))+len(list(combined_dict.keys())))
-    #dict_to_store = {**combined_dict, **dict_to_store}
-    #print(len(list(dict_to_store.keys())))
     with open(simulation_cache_save_path, 'wb') as f:
         pickle.dump(dict_to_store, f)
     print('cache_dict updated.') #test loading: with open(simulation_cache_save_path, 'rb') as f:saved_dict = pickle.load(f)
-    if(i_episode%10==0): print(f'Episode uses time: {time.time()-start}')
+    if(i_episode%1==0): print(f'Episode uses time: {time.time()-start_episode}')
+
 # Save final episode model
 if(args.save_checkpoint):
     torch.save({'epoch': i_episode,
@@ -603,6 +603,7 @@ if(args.save_checkpoint):
                 'optimizer_state_dict': optimizer.state_dict(),
                 'avg_rewards': avg_rewards,}, os.path.join(args.prefix, args.model_save_folder, f'checkpoint_generator_maxreward_episode{args.epochs}_{today}.pt'))
 
+print(f'{args.epochs} episodes uses time: {time.time()-start}')
 pdb.set_trace()
 
 # Single processing for gnn predictor
