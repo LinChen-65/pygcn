@@ -625,13 +625,17 @@ for i_episode in range(args.epochs): #20220203
     print(f'Episode {i_episode}: avg rewards={avg_rewards}.')
 '''
 
-#vac_flag = select_action(model) #deterministic 
-cbg_scores = model(gen_node_feats, adj) # stochastic, sampling
+# Inference Method 1: stochastic
+# vac_flag = select_action(model)  
+# Inference Method 2: deterministic 
+'''
+cbg_scores = model(gen_node_feats, adj)  
 sorted_indices = torch.argsort(cbg_scores,dim=0,descending=True) #20220128 # 返回从大到小的索引
 reverse = torch.reciprocal(cbg_scores.detach())
 zero = torch.zeros_like(cbg_scores.detach())
 topk_mask = torch.where(cbg_scores>cbg_scores[sorted_indices[args.NN]], reverse, zero)
 vac_flag = cbg_scores * topk_mask
+
 # Prepare inputs for PolicyEvaluator
 eval_node_feats = torch.cat((node_feats[:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, 
                              node_feats[:,:4], deg_centrality, clo_centrality, bet_centrality, mob_level, 
@@ -643,6 +647,15 @@ print('reward: ', reward)
 pdb.set_trace()
 total_cases, case_rate_std = traditional_evaluate(vac_flag) #20220204
 print('Traditional evaluated: ', total_cases, case_rate_std)
+'''
+# Inference Method 3: stochastic, sampling #20220326
+for t in range(args.epoch_width): 
+    vac_flag = select_action(model) # stochastic
+    vac_flag_list.append(vac_flag.cpu()) 
+total_cases_list = multiprocess_traditional_evaluate(vac_flag_list,cache_dict)
+reward_array = random_baseline - np.array(total_cases_list)
+print(np.max(reward_array))
+pdb.set_trace()
 
 if(args.save_checkpoint):
     print('If proceed, change model to best checkpoint.')
