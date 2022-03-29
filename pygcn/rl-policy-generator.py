@@ -27,7 +27,7 @@ import pdb
 sys.path.append(os.path.join(os.getcwd(), '../gt-generator'))
 import constants
 import functions
-import disease_model
+import disease_model_test as disease_model #import disease_model
 
 
 # 限制显卡使用
@@ -82,7 +82,7 @@ parser.add_argument('--epoch_width', default=1000, type=int,
 parser.add_argument('--model_save_folder', default= 'chenlin/pygcn/pygcn/trained_model', 
                     help='Folder to save trained model.')
 # 20220205
-parser.add_argument('--simulation_cache_filename', default='chenlin/pygcn/pygcn/simulation_cache_temp.pkl',
+parser.add_argument('--simulation_cache_filename', default='chenlin/pygcn/pygcn/simulation_cache_proportional_temp.pkl',
                     help='File to save traditional_simulate results.')
 parser.add_argument('--replay_width', type=int, default=2,
                     help='Num of experienced actions to be replayed.')
@@ -93,6 +93,11 @@ parser.add_argument('--simulation_cache_folder', default='chenlin/pygcn/pygcn',
                     help='Folder to save traditional_simulate results.')
 parser.add_argument('--save_checkpoint', default=False, action='store_true',
                     help='If true, save best checkpoint and final model to .pt file.')
+# 20220327
+parser.add_argument('--ema_decay', default=0.8,
+                    help='Exponential decay factor for ema_baseline (\'critic\').')
+parser.add_argument('--proportional', default=True,  #参考gt-gen-vac-fixed-num-cbgs-crossgroup-safedistance.py
+                    help='If true, divide vaccines proportional to cbg populations.')  
 
 args = parser.parse_args()
 # Check important parameters
@@ -106,9 +111,9 @@ print('args.epochs: ', args.epochs)
 print('args.epoch_width: ', args.epoch_width)
 print('args.replay_width: ', args.replay_width)
 print('args.save_checkpoint: ', args.save_checkpoint)
+print('args.proportional: ', args.proportional) 
 
-#evaluator_path = os.path.join(args.prefix, args.trained_evaluator_folder, 'total_cases_20220126.pt')
-#evaluator_path = os.path.join(args.prefix, args.trained_evaluator_folder, 'total_cases_of_250epochs_20220131.pt')
+
 evaluator_path = os.path.join(args.prefix, args.trained_evaluator_folder, 'total_cases_of_100epochs_20220203.pt')
 print('evaluator_path: ', evaluator_path)
 
@@ -122,16 +127,12 @@ print('simulation_cache_save_path: ', simulation_cache_save_path)
 
 cache_dict = multiprocessing.Manager().dict() 
 
-# Load simulation cache to accelarate training #20220205
-dict_path_list = ['simulation_cache_combined.pkl', 
-                  'simulation_cache_temp.pkl'
-                  #'simulation_cache_1.pkl', 
-                  #'simulation_cache_2.pkl',
-                  #'simulation_cache_3.pkl',
-                  #'simulation_cache_202202061756.pkl',
-                  #'simulation_cache_202202070130.pkl',
-                  #'simulation_cache_202202070454.pkl'
-                  ] #20220206
+# Load simulation cache to accelarate training 
+dict_path_list = ['simulation_cache_proportional_combined.pkl', # proportional
+                  'simulation_cache_proportional_temp.pkl' # proportional
+                  #'simulation_cache_combined.pkl', # not proportional
+                  #'simulation_cache_temp.pkl' # not proportional
+                  ] 
 
 combined_dict = dict()
 for dict_path in dict_path_list:
@@ -141,9 +142,7 @@ for dict_path in dict_path_list:
         combined_dict = {**combined_dict,**new_dict}
         print(f'len(new_dict): {len(new_dict)}')
         print(f'len(combined_dict): {len(combined_dict)}')
-
-pdb.set_trace()
-with open(os.path.join(args.prefix, 'chenlin/pygcn/pygcn/simulation_cache_combined.pkl'), 'wb') as f:
+with open(os.path.join(args.prefix, 'chenlin/pygcn/pygcn/simulation_cache_proportional_combined.pkl'), 'wb') as f:
     pickle.dump(combined_dict, f)
 
 
@@ -205,7 +204,9 @@ cbg_age_msa['Sum'] = cbg_age_msa['Sum'].apply(lambda x : x if x!=0 else 1)
 # Obtain cbg sizes (populations)
 cbg_sizes = cbg_age_msa['Sum'].values
 cbg_sizes = np.array(cbg_sizes,dtype='int32')
-del cbg_age_msa
+columns_of_interest = ['census_block_group','Sum'] 
+cbg_age_msa = cbg_age_msa[columns_of_interest].copy()
+#del cbg_age_msa
 
 # Load and scale age-aware CBG-specific attack/death rates (original)
 cbg_death_rates_original = np.loadtxt(os.path.join(epic_data_root, args.msa_name, 'cbg_death_rates_original_'+args.msa_name))
@@ -217,8 +218,8 @@ cbg_death_rates_scaled = cbg_death_rates_original * constants.death_scale_dict[a
 # Vaccine acceptance
 vaccine_acceptance = np.ones(len(cbg_sizes)) # full acceptance
 # Calculate number of available vaccines, number of vaccines each cbg can have
-num_vaccines = cbg_sizes.sum() * args.vaccination_ratio / args.NN
-print('Num of vaccines per CBG: ',num_vaccines)
+#num_vaccines = cbg_sizes.sum() * args.vaccination_ratio / args.NN
+#print('Num of vaccines per CBG: ',num_vaccines)
     
 ############################################################################################
 # Functions
@@ -235,7 +236,6 @@ def run_simulation(starting_seed, num_seeds, vaccination_vector, vaccine_accepta
                                poi_cbg_visits_list=poi_cbg_visits_list,
                                all_hours=all_hours,
                                p_sick_at_t0=constants.parameters_dict[args.msa_name][0],
-                               #vaccination_time=24*31, # when to apply vaccination (which hour)
                                vaccination_time=24*args.vaccination_time, # when to apply vaccination (which hour)
                                vaccination_vector = vaccination_vector,
                                vaccine_acceptance=vaccine_acceptance,
@@ -254,14 +254,24 @@ def run_simulation(starting_seed, num_seeds, vaccination_vector, vaccine_accepta
 
     m.init_endogenous_variables()
 
-    T1,L_1,I_1,R_1,C2,D2,total_affected, history_C2, history_D2, total_affected_each_cbg = m.simulate_disease_spread(no_print=True)    
-    return history_C2, history_D2
+    #T1,L_1,I_1,R_1,C2,D2,total_affected, history_C2, history_D2, total_affected_each_cbg = m.simulate_disease_spread(no_print=True)    
+    #return history_C2, history_D2
+    final_cases, final_deaths = m.simulate_disease_spread(no_print=True, store_history=False) #20220327
+    return final_cases, final_deaths #20220327
 
 
 def traditional_evaluate(vac_flag):
     # Construct vaccination vector
-    vaccination_vector = np.zeros(len(cbg_sizes))
-    vaccination_vector[torch.where(vac_flag.squeeze()!=0)[0].cpu().numpy()] = num_vaccines
+    #vaccination_vector = np.zeros(len(cbg_sizes)) #严格平均分
+    #vaccination_vector[torch.where(vac_flag.squeeze()!=0)[0].cpu().numpy()] = num_vaccines #严格平均分
+    target_idxs = torch.nonzero(vac_flag).cpu().squeeze().numpy() #20220327
+    vaccination_vector = functions.vaccine_distribution_fixed_nn(cbg_table=cbg_age_msa,  #20220327
+                                                                vaccination_ratio=args.vaccination_ratio, 
+                                                                nn=args.NN, 
+                                                                proportional=args.proportional, 
+                                                                target_idxs=target_idxs
+                                                                )
+    '''
     history_C2, history_D2 = run_simulation(starting_seed=STARTING_SEED, num_seeds=NUM_SEEDS, 
                                             vaccination_vector=vaccination_vector,
                                             vaccine_acceptance=vaccine_acceptance,
@@ -270,8 +280,15 @@ def traditional_evaluate(vac_flag):
     cases_cbg, deaths_cbg,_,_ = functions.average_across_random_seeds(history_C2,history_D2, 
                                                                     num_cbgs, idxs_msa_all, 
                                                                     print_results=False,draw_results=False)
-
     final_cases_cbg = cases_cbg[-1,:]
+    '''
+    #20220327
+    final_cases_cbg, final_deaths_cbg = run_simulation(starting_seed=STARTING_SEED, num_seeds=NUM_SEEDS, 
+                                                vaccination_vector=vaccination_vector,
+                                                vaccine_acceptance=vaccine_acceptance,
+                                                protection_rate = PROTECTION_RATE)
+    # Average across random seeds
+    final_cases_cbg = np.mean(final_cases_cbg, axis=0)
     final_cases = final_cases_cbg.sum()
     case_rates = final_cases_cbg/cbg_sizes
     case_rates_std = case_rates.std()
@@ -330,6 +347,7 @@ def select_action(model): #20220203
     
     # Construct policy #20220207
     vac_idx_list = torch.multinomial(cbg_scores.squeeze(), args.NN, replacement=False).tolist()
+    #pdb.set_trace()
     total_log_probs = 0
     for action in vac_idx_list:
         total_log_probs = total_log_probs + cbg_sampler.log_prob(torch.tensor([action]).cuda())
@@ -545,6 +563,7 @@ random_baseline = 7280 #NUM_SEEDS=40
 
 # Multiprocessing to accelarate traditional simulator #20220204
 avg_rewards_list = []
+avg_total_cases_list = [] #20220328
 max_avg_rewards = 0
 start = time.time()
 for i_episode in range(args.epochs):
@@ -554,13 +573,22 @@ for i_episode in range(args.epochs):
         vac_flag = select_action(model)
         vac_flag_list.append(vac_flag.cpu()) 
     total_cases_list = multiprocess_traditional_evaluate(vac_flag_list,cache_dict)
+    avg_total_cases_list.append(np.mean(np.array(total_cases_list))) #20220328
+    if(i_episode%10==0): print(avg_total_cases_list) #20220328
     max_reward_1 = -np.inf #20220205
     max_reward_idx_1 = 0 #20220205
     max_reward_2 = -np.inf #20220205
     max_reward_idx_2 = 0 #20220205
+    if(i_episode==0):  #20220327
+        ema_baseline = np.mean(total_cases_list)
+    else: 
+        ema_baseline = ema_baseline*args.ema_decay + np.mean(total_cases_list)*(1-args.ema_decay)
+    ema_baseline = min(ema_baseline, random_baseline)
+    print(f'ema_baseline at episode {i_episode}: {ema_baseline}')
     for t in range(args.epoch_width): 
         #reward = no_vac_baseline - total_cases_list[t] #20220204
-        reward = random_baseline - total_cases_list[t] #20220204
+        #reward = random_baseline - total_cases_list[t] #20220204
+        reward = ema_baseline - total_cases_list[t] # moving average baseline #20220327
         model.rewards.append(reward)
         if(reward>max_reward_1): #20220205
             max_reward_2 = max_reward_1
@@ -662,6 +690,8 @@ if(args.save_checkpoint):
     pdb.set_trace()
     # Load best model
     model.load_state_dict(torch.load(checkpoint_save_path)['model_state_dict'])
+    # Inference Method 2: deterministic 
+    '''
     cbg_scores = model(gen_node_feats, adj)
     sorted_indices = torch.argsort(cbg_scores,dim=0,descending=True) #20220128 # 返回从大到小的索引
     reverse = torch.reciprocal(cbg_scores.detach())
@@ -670,5 +700,13 @@ if(args.save_checkpoint):
     vac_flag = cbg_scores * topk_mask
     total_cases, case_rate_std = traditional_evaluate(vac_flag) #20220204
     print('Traditional evaluated: ', total_cases, case_rate_std)
+    '''
+    # Inference Method 3: stochastic, sampling #20220326
+    for t in range(args.epoch_width): 
+        vac_flag = select_action(model) # stochastic
+        vac_flag_list.append(vac_flag.cpu()) 
+    total_cases_list = multiprocess_traditional_evaluate(vac_flag_list,cache_dict)
+    reward_array = random_baseline - np.array(total_cases_list)
+    print(np.max(reward_array))
 
 pdb.set_trace()
