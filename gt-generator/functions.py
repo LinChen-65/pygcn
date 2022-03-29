@@ -428,7 +428,7 @@ def vaccine_distribution_fixed_nn(cbg_table, vaccination_ratio, nn, proportional
 
     # Calculate number of available vaccines, number of vaccines each cbg can have
     num_vaccines = cbg_sizes.sum() * vaccination_ratio
-    print('Total num of vaccines: ',num_vaccines)
+    #print('Total num of vaccines: ',num_vaccines)
     
     vaccination_vector = np.zeros(num_cbgs)
     if(proportional==False):
