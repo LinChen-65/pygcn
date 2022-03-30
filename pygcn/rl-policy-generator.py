@@ -205,6 +205,25 @@ cbg_sizes = np.array(cbg_sizes,dtype='int32')
 columns_of_interest = ['census_block_group','Sum'] 
 cbg_age_msa = cbg_age_msa[columns_of_interest].copy()
 #del cbg_age_msa
+'''
+ct_msa = pd.DataFrame(columns=['census_tract','Sum']) #20220330
+ct_to_cbg_dict = dict() #20220330
+for i in range(len(cbg_age_msa)):
+    this_cbg = str(cbg_age_msa.loc[i, 'census_block_group'])
+    this_ct = this_cbg[:-1]
+    if(this_ct in list(ct_to_cbg_dict.keys())):
+        ct_to_cbg_dict[this_ct].append(this_cbg)
+        #ct_msa[ct_msa['census_tract']==this_ct]['Sum'] += cbg_age_msa.loc[i,'Sum']
+        idx=ct_msa[ct_msa['census_tract']==this_ct].index
+        ct_msa.loc[idx[0],'Sum'] += cbg_age_msa.loc[i,'Sum']
+    else:
+        ct_to_cbg_dict[this_ct] = [this_cbg]
+        if(i==0):
+            ct_msa.loc[0] = [this_ct, cbg_age_msa.loc[i,'Sum']]
+        else:
+            ct_msa.loc[ct_msa.index.max() + 1] = [this_ct, cbg_age_msa.loc[i,'Sum']]
+pdb.set_trace() 
+'''
 
 # Load and scale age-aware CBG-specific attack/death rates (original)
 cbg_death_rates_original = np.loadtxt(os.path.join(epic_data_root, args.msa_name, 'cbg_death_rates_original_'+args.msa_name))
