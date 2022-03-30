@@ -485,6 +485,8 @@ class ReplayBuffer: #20220206
         self.capacity = capacity
         self.min_reward = np.inf
         self.min_reward_idx = 0
+        self.max_reward = -np.inf #20220329
+        self.max_reward_idx = 0 #20220329
 
     def store_transition(self, vac_flag, reward):
         vac_idx_list = torch.nonzero(vac_flag.squeeze()).squeeze().tolist()
@@ -493,6 +495,9 @@ class ReplayBuffer: #20220206
         if(reward<self.min_reward):
             self.min_reward = reward
             self.min_reward_idx = self.count
+        elif(reward>self.max_reward): #20220329
+            self.max_reward = reward
+            self.max_reward_idx = self.count 
         self.count += 1
         # TODO: 补一个renew，只保存reward最高的
         #if(self.count>self.capacity):
