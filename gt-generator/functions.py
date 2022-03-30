@@ -444,6 +444,6 @@ def vaccine_distribution_fixed_nn(cbg_table, vaccination_ratio, nn, proportional
         
     # Ensure that no CBG receives more vaccines than its population (may waste some)
     vaccination_vector = np.minimum(vaccination_vector,np.array(cbg_table['Sum']))
-    print('Final check: num of distributed vaccines:',vaccination_vector.sum())
+    #print('Final check: num of distributed vaccines:',vaccination_vector.sum())
     
     return vaccination_vector
