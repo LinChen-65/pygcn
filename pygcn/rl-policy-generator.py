@@ -129,7 +129,8 @@ cache_dict = multiprocessing.Manager().dict()
 
 # Load simulation cache to accelarate training 
 dict_path_list = ['simulation_cache_proportional_combined.pkl', # proportional
-                  'simulation_cache_proportional_temp.pkl' # proportional
+                  'simulation_cache_proportional_temp.pkl', # proportional
+                  'simulation_cache_proportional_temp_rl4.pkl'
                   #'simulation_cache_combined.pkl', # not proportional
                   #'simulation_cache_temp.pkl' # not proportional
                   ] 
@@ -152,9 +153,7 @@ with open(os.path.join(args.prefix, 'chenlin/pygcn/pygcn/simulation_cache_propor
 epic_data_root = f'{args.prefix}/chenlin/COVID-19/Data'
 mob_data_root = f'{args.prefix}/chenlin/COVID-19/Data' #Path to mobility data.
 
-# Vaccination protection rate
 PROTECTION_RATE = 1
-# Policy execution ratio
 EXECUTION_RATIO = 1
 MSA_NAME_FULL = constants.MSA_NAME_FULL_DICT[args.msa_name]
 
@@ -169,7 +168,6 @@ poi_cbg_visits_list = pickle.load(f)
 f.close()
 # Load precomputed parameters to adjust(clip) POI dwell times
 d = pd.read_csv(os.path.join(epic_data_root,args.msa_name, 'parameters_%s.csv' % args.msa_name)) 
-# No clipping
 MIN_DATETIME = datetime.datetime(2020, 3, 1, 0)
 MAX_DATETIME = datetime.datetime(2020, 5, 2, 23)
 all_hours = functions.list_hours_in_range(MIN_DATETIME, MAX_DATETIME)
@@ -271,17 +269,7 @@ def traditional_evaluate(vac_flag):
                                                                 proportional=args.proportional, 
                                                                 target_idxs=target_idxs
                                                                 )
-    '''
-    history_C2, history_D2 = run_simulation(starting_seed=STARTING_SEED, num_seeds=NUM_SEEDS, 
-                                            vaccination_vector=vaccination_vector,
-                                            vaccine_acceptance=vaccine_acceptance,
-                                            protection_rate = PROTECTION_RATE)
-    # Average history records across random seeds
-    cases_cbg, deaths_cbg,_,_ = functions.average_across_random_seeds(history_C2,history_D2, 
-                                                                    num_cbgs, idxs_msa_all, 
-                                                                    print_results=False,draw_results=False)
-    final_cases_cbg = cases_cbg[-1,:]
-    '''
+
     #20220327
     final_cases_cbg, final_deaths_cbg = run_simulation(starting_seed=STARTING_SEED, num_seeds=NUM_SEEDS, 
                                                 vaccination_vector=vaccination_vector,
