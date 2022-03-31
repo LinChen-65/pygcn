@@ -8,10 +8,6 @@ import sys
 import numpy as np
 import pandas as pd
 import argparse
-#from sklearn.cluster import KMeans
-#from equal_groups_kmeans import EqualGroupsKMeans #https://github.com/ndanielsen/Same-Size-K-Means
-#from balanced_kmeans import kmeans_equal
-#import torch
 from equal_size_cluster_functions import cluster_equal_size_elki,cluster_equal_size,cluster_equal_size_pair_split,cluster_equal_size_swap,cluster_equal_size_detect_cycles,lloid_equal_size_linear_assignment,cluster_equal_size_mincostmaxflow
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -26,6 +22,8 @@ parser.add_argument('--msa_name', default='SanFrancisco',
                     help='MSA name.')
 parser.add_argument('--epic_data_root', default='/data/chenlin/COVID-19/Data',
                     help='TBA')
+parser.add_argument('--nclusters', default=100, 
+                    help='Number of clusters to divide CBGs into.')
 args = parser.parse_args()
 
 # Derived variables
@@ -81,68 +79,20 @@ for i in range(len(cbg_geo_msa)):
     location_list.append([latitude[i], longitude[i]])
 location_array = np.array(location_list)
 
-'''
-clf = KMeans(n_clusters=100, random_state=0)#新建KMeans对象，并传入参数
-clf.fit(location_array)#进行训练
-#print(clf.labels_)
-#print(clf.cluster_centers_)
-'''
-'''
-clf = EqualGroupsKMeans(n_clusters=2)
-clf.fit(location_array)
-clf.labels_
-for i in range(100):
-    print(len(clf.labels_[clf.labels_==i]), np.sum(cbg_sizes[np.where(clf.labels_==i)]))
-'''
 
-'''
-
-N = len(cbg_sizes)
-batch_size = 10
-num_clusters = 100
-device = 'cuda'
-
-cluster_size = N // num_clusters
-#X = torch.rand(batch_size, N, dim, device=device)
-location_tensor = torch.from_numpy(location_array).to('cuda')
-location_tensor = torch.rand(2, 8192, 30, device=device)
-pdb.set_trace()
-choices, centers = kmeans_equal(location_tensor, num_clusters=num_clusters, cluster_size=cluster_size)
-'''
-
-'''
-configs = [(2, 8192, 30, 64)]
-batch_size = 2
-N = 8192
-dim = 30
-num_clusters = 64
-cluster_size = N // num_clusters
-X = torch.rand(batch_size, N, dim, device='cuda')
-choices, centers = kmeans_equal(X, num_clusters=num_clusters,cluster_size=cluster_size)
-
-def test_gpu_speed(batch_size, N, dim, num_clusters):
-    cluster_size = N // num_clusters
-    X = torch.rand(batch_size, N, dim, device='cuda')
-    choices, centers = kmeans_equal(X, num_clusters=num_clusters,
-                                    cluster_size=cluster_size)
-'''
-
-
-
-nclusters = 100
 savepath = os.path.join(saveroot, 'cbg_cluster.png')
-#result = cluster_equal_size_elki(location_array, nclusters, show_plt=True, savepath=savepath)
-#result = cluster_equal_size(location_array, nclusters, show_plt=True, savepath=savepath)
-#result = cluster_equal_size_pair_split(location_array, nclusters, show_plt=True, savepath=savepath)
-#result = cluster_equal_size_swap(location_array, nclusters, show_plt=True, savepath=savepath)
-#result = cluster_equal_size_detect_cycles(location_array, nclusters, show_plt=True, savepath=savepath)
-#result = lloid_equal_size_linear_assignment(location_array, nclusters, show_plt=True, savepath=savepath)
-result = cluster_equal_size_mincostmaxflow(location_array, nclusters, show_plt=True, savepath=savepath)
+#result = cluster_equal_size_elki(location_array, args.nclusters, show_plt=True, savepath=savepath)
+#result = cluster_equal_size(location_array, args.nclusters, show_plt=True, savepath=savepath)
+#result = cluster_equal_size_pair_split(location_array, args.nclusters, show_plt=True, savepath=savepath)
+#result = cluster_equal_size_swap(location_array, args.nclusters, show_plt=True, savepath=savepath)
+#result = cluster_equal_size_detect_cycles(location_array, args.nclusters, show_plt=True, savepath=savepath)
+#result = lloid_equal_size_linear_assignment(location_array, args.nclusters, show_plt=True, savepath=savepath)
+result = cluster_equal_size_mincostmaxflow(location_array, args.nclusters, show_plt=True, savepath=savepath)
 
 
 cbg_to_cluster = np.array(result[0])
-cluster_size = np.zeros(nclusters)
-for i in range(nclusters):
+cluster_size = np.zeros(args.nclusters)
+for i in range(args.nclusters):
     cluster_size[i] = len(np.where(cbg_to_cluster==i)[0])
 print(cluster_size)
 savepath = os.path.join(saveroot, 'cbg_to_cluster.npy')
@@ -150,8 +100,8 @@ with open(savepath, 'wb') as f:
     np.save(f, cbg_to_cluster)
 print(f'cbg_to_cluster saved at: {savepath}')
 
+# Filter out 'anomaly' locations, so that the visualization below can show most points clearly.
 savepath = os.path.join(saveroot, 'filtered_cbgs.png')
-#plt.scatter(location_array[:, 0], location_array[:, 1])
 filtered_location_list = []
 filtered_cluster_list = []
 lo_mean = np.mean(location_array[:, 0])
@@ -164,7 +114,8 @@ for i in range(len(location_array)):
         filtered_cluster_list.append(cbg_to_cluster[i])
 filtered_location_array = np.array(filtered_location_list)
 
-N = nclusters
+# Visualization
+N = args.nclusters
 # define the colormap
 cmap = plt.cm.jet
 # extract all colors from the .jet map
@@ -175,13 +126,10 @@ cmap = cmap.from_list('Custom cmap', cmaplist, cmap.N)
 bounds = np.linspace(0,N,N+1)
 norm = mpl.colors.BoundaryNorm(bounds, cmap.N)
 scat = plt.scatter(filtered_location_array[:, 0], filtered_location_array[:, 1], c=filtered_cluster_list, cmap=cmap, norm=norm, s=5)
-#plt.scatter(filtered_location_array[:, 0], filtered_location_array[:, 1], c=filtered_cluster_list)
-
 # create the colorbar
 cb = plt.colorbar(scat, spacing='proportional',ticks=bounds)
 cb.set_label('Custom cbar')
 #plt.title('Discrete color mappings')
-
 plt.savefig(savepath, bbox_inches = 'tight')
 
 pdb.set_trace()
