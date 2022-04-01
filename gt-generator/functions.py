@@ -431,7 +431,7 @@ def vaccine_distribution_fixed_nn(cbg_table, vaccination_ratio, nn, proportional
     #print('Total num of vaccines: ',num_vaccines)
     
     vaccination_vector = np.zeros(num_cbgs)
-    if(proportional==False):
+    if(not proportional):
         num_vaccines_per_cbg = num_vaccines / nn
         for idx in target_idxs:
             vaccination_vector[idx] = num_vaccines_per_cbg
@@ -439,6 +439,7 @@ def vaccine_distribution_fixed_nn(cbg_table, vaccination_ratio, nn, proportional
         target_population = 0
         for idx in target_idxs:
             target_population += cbg_sizes[idx]
+        print('ratio: ', num_vaccines / target_population)
         for idx in target_idxs:
             vaccination_vector[idx] = num_vaccines / target_population * cbg_sizes[idx]
         
@@ -447,3 +448,5 @@ def vaccine_distribution_fixed_nn(cbg_table, vaccination_ratio, nn, proportional
     #print('Final check: num of distributed vaccines:',vaccination_vector.sum())
     
     return vaccination_vector
+
+
