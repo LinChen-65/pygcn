@@ -1,7 +1,7 @@
-# python gt-gen-community.py
+# python gt-gen-community.py --num_strategies 100 --random_seed 42
 
 import setproctitle
-setproctitle.setproctitle("gnn-simu-vac@chenlin")
+setproctitle.setproctitle("gnn-vac@chenlin")
 
 import socket
 import argparse
@@ -69,6 +69,8 @@ if(hostname in ['fib-dl3','rl3','rl2']):
     prime = '/data'
 elif(hostname=='rl4'):
     prime = '/home'
+elif(hostname=='fib-dl'): #dl2
+    prime = '/data4'
 root = os.path.join(prime, 'chenlin/COVID-19/Data')
 saveroot = os.path.join(prime, 'chenlin/pygcn/data/safegraph')
 community_path = os.path.join(prime, 'chenlin/pygcn/pygcn/cbg_to_cluster.npy')
@@ -79,12 +81,18 @@ filename = os.path.join(saveroot, args.msa_name,
                         f'vac_results_community_{args.msa_name}_{args.vaccination_ratio}_{args.NN}_randomseed{args.random_seed}_{NUM_SEEDS}seeds.csv')
 print('filename: ', filename)
 if(os.path.exists(filename)):
-    #print('This file already exists. Better have a check?')
-    #pdb.set_trace()
     print('There exists result_df of the same name. Load it.')
     previous_result_exists = True
     result_df = pd.read_csv(filename)
     print('len(result_df): ', len(result_df))
+    print('result_df.columns: ', result_df.columns)
+    col_to_drop = []
+    for i in range(len(result_df.columns)):
+        if('Unnamed' in result_df.columns[i]):
+            col_to_drop.append(result_df.columns[i])
+    for i in range(len(col_to_drop)):
+        result_df.drop(col_to_drop[i], axis=1, inplace=True)
+    print('After removing unnamed columns, result_df.columns: ', result_df.columns)
 else:
     previous_result_exists = False
 
@@ -95,7 +103,7 @@ if(os.path.exists(all_tested_strategies_path)):
     all_tested_strategies = np.load(all_tested_strategies_path).tolist()
 else:
     all_tested_strategies = []
-print(all_tested_strategies)
+print('len(all_tested_strategies): ', len(all_tested_strategies))
 
 ###############################################################################
 # Functions
