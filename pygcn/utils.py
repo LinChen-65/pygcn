@@ -60,22 +60,15 @@ def load_vac_results(vac_result_path, rel_result): #20220117, 拆分代码
         if(graph_labels.shape[1]==4):
             graph_labels[:,2] = (graph_labels[:,2]-final_deaths_no_vac)
             graph_labels[:,3] = (graph_labels[:,3]-death_rate_std_no_vac)
-
     else:
         print('rel_result=False')
 
-    # idx_train, idx_val, idx_test
-    # Split train, val, test
-    #idx_train = range(int(0.8*num_samples))
-    #idx_val = range(int(0.8*num_samples), int(0.9*num_samples))
-    #idx_test = range(int(0.9*num_samples), int(num_samples))
+    # Split train, val, test # idx_train, idx_val, idx_test
     shuffled = np.arange(num_samples)
     np.random.seed(42) #20220201
     np.random.shuffle(shuffled) #20220119
 
     idx_train = shuffled[:int(0.8*num_samples)]
-    #idx_val = shuffled[int(0.8*num_samples):int(0.9*num_samples)]
-    #idx_test = shuffled[int(0.9*num_samples):]
     idx_test = shuffled[int(0.8*num_samples):int(0.9*num_samples)]
     idx_val = shuffled[int(0.9*num_samples):]
 
@@ -84,13 +77,12 @@ def load_vac_results(vac_result_path, rel_result): #20220117, 拆分代码
     idx_val = torch.LongTensor(idx_val)
     idx_test = torch.LongTensor(idx_test)
 
-    #vac_tags = np.array(df['Vaccinated_Idxs'][1:])
     vac_tags = np.array(df['Vaccinated_Idxs'])
 
     return graph_labels, idx_train, idx_val, idx_test, num_samples, vac_tags
 
 
-def load_adj(msa_name,mob_data_root,output_root): #20220117, 拆分代码
+def load_adj(msa_name, data_root, output_root): #20220117, 拆分代码
     adj_path = os.path.join(output_root, 'adj_%s.npy' % msa_name)
     if(os.path.exists(adj_path)):
         adj = np.load(adj_path)
@@ -98,7 +90,7 @@ def load_adj(msa_name,mob_data_root,output_root): #20220117, 拆分代码
     else:
         # Load POI-CBG visiting matrices
         msa_name_full = constants.MSA_NAME_FULL_DICT[msa_name]
-        mob_data_path = os.path.join(mob_data_root, msa_name, '%s_2020-03-01_to_2020-05-02.pkl' % msa_name_full)
+        mob_data_path = os.path.join(data_root, msa_name, '%s_2020-03-01_to_2020-05-02.pkl' % msa_name_full)
         f = open(mob_data_path, 'rb') 
         poi_cbg_visits_list = pickle.load(f)
         f.close()
@@ -107,7 +99,6 @@ def load_adj(msa_name,mob_data_root,output_root): #20220117, 拆分代码
         num_pois = single_array.shape[0]; print('num_pois: ', num_pois)
         num_cbgs = single_array.shape[1]; print('num_cbgs: ', num_cbgs)
         num_nodes = num_pois + num_cbgs; print('num_nodes (cbg+poi): ', num_nodes)
-        #num_days = int(len(poi_cbg_visits_list)/24) #1512h/24h
         # Average all poi-cbg arrays
         num_hours = len(poi_cbg_visits_list); print('num_hours: ', num_hours)
         avg_array_path = os.path.join(output_root, 'avg_array_%s.npy' % msa_name)
@@ -133,20 +124,15 @@ def load_adj(msa_name,mob_data_root,output_root): #20220117, 拆分代码
     
 
 def load_pretrained_embed(pretrain_embed_path): #20220117, 拆分代码
-    #pretrained_embed = np.load('/data/chenlin/code-dynalearn/scripts/figure-6/gt-generator/covid/outputs/node_embeddings_b1.0.npy')
-    #pretrained_embed = np.load('/home/chenlin/code-dynalearn/scripts/figure-6/gt-generator/covid/outputs/node_embeddings_b1.0.npy')
     pretrained_embed = np.load(pretrain_embed_path) #20220123
-
     num_embed = pretrained_embed.shape[1]
-    # normalization
-    #pretrained_embed = preprocessing.robust_scale(pretrained_embed) #20220127注释
     return pretrained_embed, num_embed
 
 
-def load_cbg_age(mob_data_root, cbg_ids_msa, normalize=True): #20220117, 拆分代码
-    filepath = os.path.join(mob_data_root,"safegraph_open_census_data/data/cbg_b01.csv")
+def load_cbg_age(data_root, cbg_ids_msa, normalize=True): #20220117, 拆分代码
+    filepath = os.path.join(data_root,"safegraph_open_census_data/data/cbg_b01.csv")
     cbg_agesex = pd.read_csv(filepath)
-    # Extract CBGs belonging to the MSA - https://covid-mobility.stanford.edu//datasets/
+    # Extract CBGs belonging to the MSA
     cbg_age_msa = pd.merge(cbg_ids_msa, cbg_agesex, on='census_block_group', how='left')
     # Deal with NaN values
     cbg_age_msa.fillna(0,inplace=True)
@@ -154,16 +140,13 @@ def load_cbg_age(mob_data_root, cbg_ids_msa, normalize=True): #20220117, 拆分�
     cbg_age_msa.rename(columns={'B01001e1':'Sum'},inplace=True)
     cbg_age_msa['Sum'] = cbg_age_msa['Sum'].apply(lambda x : x if x!=0 else 1)
     # Add up males and females of the same age, according to the detailed age list (DETAILED_AGE_LIST)
-    # which is defined in Constants.py
+    # which is defined in constants.py
     for i in range(3,25+1): # 'B01001e3'~'B01001e25'
         male_column = 'B01001e'+str(i)
         female_column = 'B01001e'+str(i+24)
         cbg_age_msa[constants.DETAILED_AGE_LIST[i-3]] = cbg_age_msa.apply(lambda x : x[male_column]+x[female_column],axis=1)
     # Rename
     cbg_age_msa.rename(columns={'B01001e1':'Sum'},inplace=True)
-    # Extract columns of interest
-    #columns_of_interest = ['census_block_group','Sum'] + constants.DETAILED_AGE_LIST
-    #cbg_age_msa = cbg_age_msa[columns_of_interest].copy()
     # Deal with CBGs with 0 populations
     cbg_age_msa['Sum'] = cbg_age_msa['Sum'].apply(lambda x : x if x!=0 else 1)
     # Calculate elder ratios
@@ -184,9 +167,8 @@ def load_cbg_age(mob_data_root, cbg_ids_msa, normalize=True): #20220117, 拆分�
     return cbg_sizes, cbg_sizes_original, cbg_elder_ratio
 
 
-def load_cbg_income(mob_data_root, cbg_ids_msa, normalize=True): #20220117, 拆分代码
-    # Load ACS 5-year (2013-2017) Data: Mean Household Income
-    filepath = os.path.join(mob_data_root,"safegraph_open_census_data/data/ACS_5years_Income_Filtered_Summary.csv")
+def load_cbg_income(data_root, cbg_ids_msa, normalize=True): #20220117, 拆分代码
+    filepath = os.path.join(data_root,"safegraph_open_census_data/data/ACS_5years_Income_Filtered_Summary.csv")
     cbg_income = pd.read_csv(filepath)
     # Drop duplicate column 'Unnamed:0'
     cbg_income.drop(['Unnamed: 0'],axis=1, inplace=True)
@@ -200,16 +182,11 @@ def load_cbg_income(mob_data_root, cbg_ids_msa, normalize=True): #20220117, 拆�
     cbg_income_msa.fillna(0,inplace=True)
     cbg_household_income = np.array(cbg_income_msa['Mean_Household_Income'])
     
-    # Normalization
-    #if(normalize): #20220127注释
-    #    cbg_household_income = preprocessing.robust_scale(cbg_household_income.reshape(-1,1))
-    
     return cbg_household_income
 
 
-def load_cbg_occupation(mob_data_root, cbg_ids_msa, cbg_sizes, normalize=True): #20220117, 拆分代码
-    # cbg_c24.csv: Occupation
-    filepath = os.path.join(mob_data_root,"safegraph_open_census_data/data/cbg_c24.csv")
+def load_cbg_occupation(data_root, cbg_ids_msa, cbg_sizes, normalize=True): #20220117, 拆分代码
+    filepath = os.path.join(data_root,"safegraph_open_census_data/data/cbg_c24.csv")
     cbg_occupation = pd.read_csv(filepath)
     # Extract pois corresponding to the metro area, by merging dataframes
     cbg_occupation_msa = pd.merge(cbg_ids_msa, cbg_occupation, on='census_block_group', how='left')
@@ -223,164 +200,95 @@ def load_cbg_occupation(mob_data_root, cbg_ids_msa, cbg_sizes, normalize=True): 
     cbg_occupation_msa['Essential_Worker_Ratio'] = cbg_occupation_msa['Essential_Worker_Absolute'] / cbg_occupation_msa['Sum']
     # Deal with NaN values
     cbg_occupation_msa.fillna(0,inplace=True)
-    #columns_of_interest = ['census_block_group','Sum','Essential_Worker_Absolute','Essential_Worker_Ratio']
-    #cbg_occupation_msa = cbg_occupation_msa[columns_of_interest].copy()
     cbg_ew_ratio = np.array(cbg_occupation_msa['Essential_Worker_Ratio'])
-
-    # Normalization
-    #if(normalize):#20220127注释
-    #    cbg_ew_ratio = preprocessing.robust_scale(cbg_ew_ratio.reshape(-1,1))
     
     return cbg_ew_ratio
 
 
-def load_cbg_demographics(msa_name, mob_data_root, normalize=True): #20220117, 拆分代码
+def load_cbg_minority(data_root, cbg_ids_msa, cbg_sizes, normalize=True): #20220401加
+    # cbg_b03.csv: HISPANIC OR LATINO ORIGIN BY RACE
+    filepath = os.path.join(data_root,"safegraph_open_census_data/data/cbg_b03.csv")
+    cbg_ethnic = pd.read_csv(filepath)
+    # Extract pois corresponding to the metro area, by merging dataframes
+    cbg_ethnic_msa = pd.merge(cbg_ids_msa, cbg_ethnic, on='census_block_group', how='left')
+    del cbg_ethnic
+    cbg_ethnic_msa.rename(columns={'B03002e1':'Sum',
+                                   'B03002e2':'NH_Total',
+                                   'B03002e3':'NH_White',
+                                   'B03002e4':'NH_Black',
+                                   'B03002e5':'NH_Indian',
+                                   'B03002e6':'NH_Asian',
+                                   'B03002e7':'NH_Hawaiian',
+                                   'B03002e12':'Hispanic'}, inplace=True)
+    cbg_ethnic_msa['Sum'] = cbg_sizes #cbg_age_msa['Sum']
+    cbg_ethnic_msa['Minority_Absolute'] = cbg_ethnic_msa['Sum'] - cbg_ethnic_msa['NH_White'] 
+    cbg_ethnic_msa['Minority_Ratio'] = cbg_ethnic_msa['Minority_Absolute'] / cbg_ethnic_msa['Sum']
+    # Deal with NaN values
+    cbg_ethnic_msa.fillna(0,inplace=True)
+    cbg_minority_ratio = np.array(cbg_ethnic_msa['Minority_Ratio'])
+
+    return cbg_minority_ratio
+
+
+
+
+def load_cbg_demographics(msa_name, data_root, normalize=True): #20220117, 拆分代码 #20220401, add race/ethnicity minority
     msa_name_full = constants.MSA_NAME_FULL_DICT[msa_name]
     # Obtain CBG populations
     # Load CBG ids for the MSA
-    cbg_ids_msa = pd.read_csv(os.path.join(mob_data_root,msa_name,'%s_cbg_ids.csv' % msa_name_full)) 
+    cbg_ids_msa = pd.read_csv(os.path.join(data_root,msa_name,'%s_cbg_ids.csv' % msa_name_full)) 
     cbg_ids_msa.rename(columns={"cbg_id":"census_block_group"}, inplace=True)
     
     # CBG age (elder ratio) and size (population)
-    cbg_sizes, cbg_sizes_original, cbg_elder_ratio = load_cbg_age(mob_data_root, cbg_ids_msa, normalize)
+    cbg_sizes, cbg_sizes_original, cbg_elder_ratio = load_cbg_age(data_root, cbg_ids_msa, normalize)
     # CBG income
-    cbg_household_income = load_cbg_income(mob_data_root, cbg_ids_msa, normalize)
+    cbg_household_income = load_cbg_income(data_root, cbg_ids_msa, normalize)
     # CBG essential worker ratio
-    cbg_ew_ratio = load_cbg_occupation(mob_data_root, cbg_ids_msa, cbg_sizes_original, normalize)
+    cbg_ew_ratio = load_cbg_occupation(data_root, cbg_ids_msa, cbg_sizes_original, normalize)
+    # CBG minority ratio #20220401
+    cbg_minority_ratio = load_cbg_minority(data_root, cbg_ids_msa, cbg_sizes_original, normalize) 
 
     # Reshape #20220127
     cbg_sizes = cbg_sizes.reshape(-1,1) 
     cbg_elder_ratio = cbg_elder_ratio.reshape(-1,1)
     cbg_household_income = cbg_household_income.reshape(-1,1)
     cbg_ew_ratio = cbg_ew_ratio.reshape(-1,1)
+    cbg_minority_ratio = cbg_minority_ratio.reshape(-1,1)
 
-    return cbg_sizes, cbg_elder_ratio, cbg_household_income, cbg_ew_ratio
+    return cbg_sizes, cbg_elder_ratio, cbg_household_income, cbg_ew_ratio, cbg_minority_ratio
 
 
-def load_data(vac_result_path="../data/cora/", dataset="cora", msa_name=None, mob_data_root=None, output_root=None, pretrain_embed_path=None, normalize=True, rel_result=True, with_vac_flag=True):
+def load_data(dataset, msa_name, mob_data_root, output_root, normalize=True, rel_result=True): #20220401改
     if(rel_result): print('rel_result=True')
     else: print('rel_result=False')
-    if('safegraph' in dataset):
-        """Load safegraph dataset"""
+    if('safegraph' in dataset): 
         print('Loading {} dataset...'.format(dataset))
 
-        if(with_vac_flag): # For training predictor
-            # vaccination results
-            graph_labels, idx_train, idx_val, idx_test, num_samples, vac_tags = load_vac_results(vac_result_path,rel_result)
-            
-            # adj
-            adj, num_cbgs = load_adj(msa_name,mob_data_root,output_root)
+        # adj
+        adj, num_cbgs = load_adj(msa_name, mob_data_root, output_root)
 
-            # node_feats
-            # pretrained_embed
-            pretrained_embed, num_embed = load_pretrained_embed(pretrain_embed_path) 
-            # cbg population and other demographic features
-            cbg_sizes, cbg_elder_ratio, cbg_household_income, cbg_ew_ratio = load_cbg_demographics(msa_name, mob_data_root, normalize)
-            
-            if(normalize): # Data normalization #20220127
-                # Obtain statistics on train set -> Apply to all data
-                scaler = preprocessing.StandardScaler()
-                cbg_sizes = scaler.fit_transform(cbg_sizes)
-                cbg_elder_ratio = scaler.fit_transform(cbg_elder_ratio)
-                cbg_household_income = scaler.fit_transform(cbg_household_income)
-                cbg_ew_ratio = scaler.fit_transform(cbg_ew_ratio)
-                pretrained_embed = scaler.fit_transform(pretrained_embed)
-                '''
-                scaler.fit(cbg_sizes[idx_train])
-                cbg_sizes = scaler.transform(cbg_sizes)
-                scaler.fit(cbg_elder_ratio[idx_train])
-                cbg_elder_ratio = scaler.transform(cbg_elder_ratio)
-                scaler.fit(cbg_household_income[idx_train])
-                cbg_household_income = scaler.transform(cbg_household_income)
-                scaler.fit(cbg_ew_ratio[idx_train])
-                cbg_ew_ratio = scaler.transform(cbg_ew_ratio)
-                scaler.fit(pretrained_embed[idx_train])
-                pretrained_embed = scaler.transform(pretrained_embed)
-                '''
-            
-            node_feats = np.zeros(((num_samples, num_cbgs, 5+num_embed)))
-            node_feats[:,:,0] = cbg_sizes.reshape(1,-1)
-            node_feats[:,:,1] = cbg_elder_ratio.reshape(1,-1)
-            node_feats[:,:,2] = cbg_household_income.reshape(1,-1)
-            node_feats[:,:,3] = cbg_ew_ratio.reshape(1,-1)
-            node_feats[:,:,4:4+num_embed] = pretrained_embed
-            # vac tags
-            for i in range(num_samples):
-                node_feats[i, vac_tags[i], -1] = 1   
-            
-            node_feats = torch.FloatTensor(node_feats)
-            return adj, node_feats, graph_labels, idx_train, idx_val, idx_test
+        # node_feats
+        # cbg population and other demographic features
+        cbg_sizes, cbg_elder_ratio, cbg_household_income, cbg_ew_ratio, cbg_minority_ratio = load_cbg_demographics(msa_name, mob_data_root, normalize)
+        
+        if(normalize): # Data normalization #20220128
+            scaler = preprocessing.StandardScaler()
+            cbg_sizes = scaler.fit_transform(cbg_sizes)
+            cbg_elder_ratio = scaler.fit_transform(cbg_elder_ratio)
+            cbg_household_income = scaler.fit_transform(cbg_household_income)
+            cbg_ew_ratio = scaler.fit_transform(cbg_ew_ratio)
+            cbg_minority_ratio = scaler.fit_transform(cbg_minority_ratio) #20220401
 
-        else: # For training policy generator
-            # adj
-            adj, num_cbgs = load_adj(msa_name,mob_data_root,output_root)
+        node_feats = np.zeros((num_cbgs, 5))
+        node_feats[:,0] = cbg_sizes.reshape(1,-1)
+        node_feats[:,1] = cbg_elder_ratio.reshape(1,-1)
+        node_feats[:,2] = cbg_household_income.reshape(1,-1)
+        node_feats[:,3] = cbg_ew_ratio.reshape(1,-1)
+        node_feats[:,4] = cbg_minority_ratio.reshape(1,-1) #20220401
 
-            # node_feats
-            # pretrained_embed
-            pretrained_embed, num_embed = load_pretrained_embed(pretrain_embed_path) 
-            # cbg population and other demographic features
-            cbg_sizes, cbg_elder_ratio, cbg_household_income, cbg_ew_ratio = load_cbg_demographics(msa_name, mob_data_root, normalize)
-            
-            if(normalize): # Data normalization #20220128
-                # Obtain statistics on train set -> Apply to all data
-                scaler = preprocessing.StandardScaler()
-                cbg_sizes = scaler.fit_transform(cbg_sizes)
-                cbg_elder_ratio = scaler.fit_transform(cbg_elder_ratio)
-                cbg_household_income = scaler.fit_transform(cbg_household_income)
-                cbg_ew_ratio = scaler.fit_transform(cbg_ew_ratio)
-                pretrained_embed = scaler.fit_transform(pretrained_embed)
+        node_feats = torch.FloatTensor(node_feats)
+        return adj, node_feats
 
-            node_feats = np.zeros((num_cbgs, 4+num_embed))
-            node_feats[:,0] = cbg_sizes.reshape(1,-1)
-            node_feats[:,1] = cbg_elder_ratio.reshape(1,-1)
-            node_feats[:,2] = cbg_household_income.reshape(1,-1)
-            node_feats[:,3] = cbg_ew_ratio.reshape(1,-1)
-            node_feats[:,4:4+num_embed] = pretrained_embed
-
-            node_feats = torch.FloatTensor(node_feats)
-            return adj, node_feats
-
-    elif(dataset=='cora'):
-        """Load citation network dataset (cora only for now)"""
-        print('Loading {} dataset...'.format(dataset))
-        pdb.set_trace()
-        '''
-        idx_features_labels = np.genfromtxt("{}{}.content".format(vac_result_path, dataset),
-                                            dtype=np.dtype(str))
-        features = sp.csr_matrix(idx_features_labels[:, 1:-1], dtype=np.float32)
-        labels = encode_onehot(idx_features_labels[:, -1])
-
-        # build graph
-        idx = np.array(idx_features_labels[:, 0], dtype=np.int32)
-        idx_map = {j: i for i, j in enumerate(idx)}
-        edges_unordered = np.genfromtxt("{}{}.cites".format(vac_result_path, dataset),
-                                        dtype=np.int32)
-        edges = np.array(list(map(idx_map.get, edges_unordered.flatten())),
-                        dtype=np.int32).reshape(edges_unordered.shape)
-        adj = sp.coo_matrix((np.ones(edges.shape[0]), (edges[:, 0], edges[:, 1])),
-                            shape=(labels.shape[0], labels.shape[0]),
-                            dtype=np.float32)
-
-        # build symmetric adjacency matrix
-        adj = adj + adj.T.multiply(adj.T > adj) - adj.multiply(adj.T > adj)
-
-        features = normalize(features)
-        adj = normalize(adj + sp.eye(adj.shape[0]))
-
-        idx_train = range(140)
-        idx_val = range(200, 500)
-        idx_test = range(500, 1500)
-
-        features = torch.FloatTensor(np.array(features.todense()))
-        labels = torch.LongTensor(np.where(labels)[1])
-        adj = sparse_mx_to_torch_sparse_tensor(adj)
-
-        idx_train = torch.LongTensor(idx_train)
-        idx_val = torch.LongTensor(idx_val)
-        idx_test = torch.LongTensor(idx_test)
-
-        return adj, features, labels, idx_train, idx_val, idx_test
-        '''
     else:
         print('Invalid dataset. Please check.')
         pdb.set_trace()
