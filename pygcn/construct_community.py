@@ -1,6 +1,7 @@
-from torch import norm
+# python construct_community.py
+
 import setproctitle
-setproctitle.setproctitle("covid-19-vac@chenlin")
+setproctitle.setproctitle("gnn-vac@chenlin")
 
 import socket
 import os
@@ -8,7 +9,7 @@ import sys
 import numpy as np
 import pandas as pd
 import argparse
-from equal_size_cluster_functions import cluster_equal_size_elki,cluster_equal_size,cluster_equal_size_pair_split,cluster_equal_size_swap,cluster_equal_size_detect_cycles,lloid_equal_size_linear_assignment,cluster_equal_size_mincostmaxflow
+from equal_size_cluster_functions import cluster_equal_size_mincostmaxflow
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
